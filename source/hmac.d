@@ -5,7 +5,12 @@ import deimos.openssl.evp;
 
 import secured.util;
 
-public ubyte[] hmac(ubyte[] data, ubyte[] key)
+public ubyte[] hmac(ubyte[] key, ubyte[] data)
+in
+{
+	assert(key.length == 48, "HMAC key must be 48 bytes in length.");
+}
+body
 {
 	//Create the OpenSSL context
 	EVP_MD_CTX *mdctx;
@@ -46,7 +51,12 @@ public ubyte[] hmac(ubyte[] data, ubyte[] key)
 	return digest;
 }
 
-public ubyte[] hmac(string path, ubyte[] key)
+public ubyte[] hmac(ubyte[] key, string path)
+in
+{
+	assert(key.length == 48, "HMAC key must be 48 bytes in length.");
+}
+body
 {
 	//Open the file for reading
 	auto fsfile = File(path, "rb");

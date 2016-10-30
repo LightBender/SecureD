@@ -16,9 +16,9 @@ public ubyte[] random(uint bytes)
 		import std.format;
 		import std.stdio;
 
-		//Initialize the system random file buffer
 		try
 		{
+			//Initialize the system random file buffer
 			File urandom = File("/dev/urandom", "rb");
 			urandom.setvbuf(null, _IONBF);
 			scope(exit) urandom.close();
@@ -49,6 +49,7 @@ public ubyte[] random(uint bytes)
 	else version(Windows)
 	{
 		import core.sys.windows.windows;
+		import std.format;
 		HCRYPTPROV hCryptProv;
 
 		//Get the cryptographic context from Windows
