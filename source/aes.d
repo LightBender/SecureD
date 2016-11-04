@@ -1,7 +1,6 @@
 module secured.aes;
 
 import deimos.openssl.evp;
-import std.stdio;
 
 import secured.hmac;
 import secured.random;
@@ -19,7 +18,8 @@ body
 	if (ctx is null)
 		throw new CryptographicException("Cannot get an OpenSSL cipher context.");
 	scope(exit)
-		EVP_CIPHER_CTX_free(ctx);
+		if (ctx !is null)
+			EVP_CIPHER_CTX_free(ctx);
 
 	//Generate a random IV
 	ubyte[] iv = random(16);
