@@ -73,3 +73,67 @@ public ubyte[] random(uint bytes)
 
 	return buffer;
 }
+
+unittest
+{
+	import std.digest.digest;
+	import std.stdio;
+
+	writeln("Testing Random Number Generator with 32/64/512/2048 bytes:");
+
+	//Test 32 bytes
+	ubyte[] rnd1 = random(32);
+	writeln("32 Bytes:");
+	writeln(toHexString!(LetterCase.lower)(rnd1));
+	assert(rnd1.length == 32);
+
+	//Test 128 bytes
+	ubyte[] rnd2 = random(128);
+	writeln("128 Bytes:");
+	writeln(toHexString!(LetterCase.lower)(rnd2));
+	assert(rnd2.length == 128);
+
+	//Test 512 bytes
+	ubyte[] rnd3 = random(512);
+	writeln("512 Bytes:");
+	writeln(toHexString!(LetterCase.lower)(rnd3));
+	assert(rnd3.length == 512);
+
+	//Test 2048 bytes
+	ubyte[] rnd4 = random(2048);
+	writeln("2048 Bytes:");
+	writeln(toHexString!(LetterCase.lower)(rnd4));
+	assert(rnd4.length == 2048);
+}
+
+unittest
+{
+	import std.digest.digest;
+	import std.stdio;
+
+	writeln("Testing Random Number Generator for Equality:");
+
+	//Test 32 bytes
+	ubyte[] rnd1 = random(32);
+	ubyte[] rnd2 = random(32);
+	writeln("Testing with 32 Bytes");
+	assert(!constantTimeEquality(rnd1, rnd2));
+
+	//Test 128 bytes
+	rnd1 = random(128);
+	rnd2 = random(128);
+	writeln("Testing with 128 Bytes");
+	assert(!constantTimeEquality(rnd1, rnd2));
+
+	//Test 512 bytes
+	rnd1 = random(512);
+	rnd2 = random(512);
+	writeln("Testing with 512 Bytes");
+	assert(!constantTimeEquality(rnd1, rnd2));
+
+	//Test 2048 bytes
+	rnd1 = random(2048);
+	rnd2 = random(2048);
+	writeln("Testing with 2048 Bytes");
+	assert(!constantTimeEquality(rnd1, rnd2));
+}
