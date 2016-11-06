@@ -75,6 +75,32 @@ public class EllipticCurve
 		BIO_free_all(bio);
 	}
 
+	public this(ubyte[] privateKey, string password)
+	{
+		//Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
+		ubyte[] seedbuf = random(32);
+		RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
+
+		_hasPrivateKey = true;
+
+		BIO* bio = BIO_new_mem_buf(privateKey.ptr, cast(int)privateKey.length);
+		PEM_read_bio_PrivateKey(bio, null, null, password !is null ?cast(ubyte*)password.ptr : null);
+		BIO_free_all(bio);
+	}
+
+	public this(ubyte[] publicKey)
+	{
+		//Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
+		ubyte[] seedbuf = random(32);
+		RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
+
+		_hasPrivateKey = false;
+
+		BIO* bio = BIO_new_mem_buf(publicKey.ptr, cast(int)publicKey.length);
+		key = PEM_read_bio_PUBKEY(bio, null, null, null);
+		BIO_free_all(bio);
+	}
+
 	public ~this()
 	{
 		if (key !is null)
@@ -193,5 +219,46 @@ public class EllipticCurve
 		}
 
 		BIO_free_all(bio);
+	}
+
+	public ubyte[] getPublicKey()
+	{
+		BIO* bio = BIO_new(BIO_s_mem());
+
+		PEM_write_bio_PUBKEY(bio, key);
+
+		ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
+		BIO_read(bio, buffer.ptr, cast(int)buffer.length);
+		BIO_free_all(bio);
+
+		return buffer;
+	}
+
+	public ubyte[] getPrivateKey(string password, bool use3Des = false)
+	{
+		BIO* bio = BIO_new(BIO_s_mem());
+
+		if (!_hasPrivateKey)
+			return null;
+
+		if (password is null)
+			PEM_write_bio_PrivateKey(bio, key, null, null, 0, null, null);
+		else
+		{
+			PEM_write_bio_PrivateKey(
+				bio,
+				key,
+				!use3Des ? EVP_aes_256_ctr() : EVP_des_ede3_cbc(),
+				cast(ubyte*)password.ptr,
+				cast(int)password.length,
+				null,
+				null);
+		}
+
+		ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
+		BIO_read(bio, buffer.ptr, cast(int)buffer.length);
+		BIO_free_all(bio);
+
+		return buffer;
 	}
 }
