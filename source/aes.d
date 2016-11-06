@@ -31,18 +31,15 @@ body
 	//Write data to the cipher context
 	int written = 0;
 	int len = 0;
-	ubyte[] output = new ubyte[data.length+1];
+	ubyte[] output = new ubyte[data.length];
 	if (EVP_EncryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length) != 1)
 		throw new CryptographicException("Unable to write bytes to cipher context.");
 	written += len;
 
 	//Extract the complete ciphertext
-	if (EVP_EncryptFinal_ex(ctx, &output[written], &len) != 1)
+	if (EVP_EncryptFinal_ex(ctx, &output[written-1], &len) != 1)
 		throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
 	written += len;
-
-	//Workaround for extra byte required
-	output = output[0..$-1];
 
 	//HMAC the combined cipher text
 	ubyte[] hashdata = additionalData !is null ? iv ~ output ~ additionalData : iv ~ output;
@@ -94,13 +91,13 @@ body
 	//Write data to the cipher context
 	int written = 0;
 	int len = 0;
-	ubyte[] output = new ubyte[data.length];
+	ubyte[] output = new ubyte[payload.length];
 	if (EVP_DecryptUpdate(ctx, &output[written], &len, payload.ptr, cast(int)payload.length) != 1)
 		throw new CryptographicException("Unable to write bytes to cipher context.");
 	written += len;
 
 	//Extract the complete plaintext
-	if (EVP_DecryptFinal_ex(ctx, &output[written], &len) != 1)
+	if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) != 1)
 		throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
 	written += len;
 
@@ -111,6 +108,7 @@ unittest
 {
 	import std.digest.digest;
 	import std.stdio;
+	import std.conv;
 
 	writeln("Testing Encryption (No Additional Data)");
 
@@ -130,6 +128,8 @@ unittest
 	ubyte[] dec = decrypt(key, enc, null);
 	writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
 	writeln("Decryption Output: ", cast(string)dec);
+
+	assert((cast(string)dec) == input);
 }
 
 unittest
@@ -156,4 +156,6 @@ unittest
 	ubyte[] dec = decrypt(key, enc, cast(ubyte[])ad);
 	writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
 	writeln("Decryption Output: ", cast(string)dec);
+
+	assert((cast(string)dec) == input);
 }
