@@ -8,7 +8,7 @@ import secured.util;
 public ubyte[] hmac(ubyte[] key, ubyte[] data)
 in
 {
-	assert(key.length == 48, "HMAC key must be 48 bytes in length.");
+	assert(key.length <= 48, "HMAC key must be less than or equal to 48 bytes in length.");
 }
 body
 {
@@ -71,7 +71,7 @@ unittest {
 public ubyte[] hmac(ubyte[] key, string path)
 in
 {
-	assert(key.length == 48, "HMAC key must be 48 bytes in length.");
+	assert(key.length <= 48, "HMAC key must be less than or equal to 48 bytes in length.");
 }
 body
 {

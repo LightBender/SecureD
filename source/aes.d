@@ -31,7 +31,7 @@ body
 	//Write data to the cipher context
 	int written = 0;
 	int len = 0;
-	ubyte[] output = new ubyte[data.length];
+	ubyte[] output = new ubyte[data.length+1];
 	if (EVP_EncryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length) != 1)
 		throw new CryptographicException("Unable to write bytes to cipher context.");
 	written += len;
@@ -41,8 +41,11 @@ body
 		throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
 	written += len;
 
+	//Workaround for extra byte required
+	output = output[0..$-1];
+
 	//HMAC the combined cipher text
-	ubyte[] hashdata = iv ~ output ~ additionalData;
+	ubyte[] hashdata = additionalData !is null ? iv ~ output ~ additionalData : iv ~ output;
 	ubyte[] hash = hmac(key, hashdata);
 
 	//Return the HMAC + IV + Ciphertext as a single byte array.
@@ -57,7 +60,7 @@ in
 body
 {
 	ubyte[] datahash = data[0..48];
-	ubyte[] dataad = data[48..$] ~ additionalData;
+	ubyte[] dataad = additionalData !is null ? data[48..$] ~ additionalData : data[48..$];
 	ubyte[] computed = hmac(key, dataad);
 
 	return constantTimeEquality(datahash, computed);
@@ -102,4 +105,55 @@ body
 	written += len;
 
 	return output;
+}
+
+unittest
+{
+	import std.digest.digest;
+	import std.stdio;
+
+	writeln("Testing Encryption (No Additional Data)");
+
+	ubyte[32] key = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+	string input = "The quick brown fox jumps over the lazy dog.";
+	writeln("Encryption Input: ", input);
+	ubyte[] enc = encrypt(key, cast(ubyte[])input, null);
+	writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
+
+	write("Testing Validation (No Additional Data): ");
+	assert(validate(key, enc, null));
+	writeln("Success!");
+
+	writeln("Testing Decryption (No Additional Data)");
+	ubyte[] dec = decrypt(key, enc, null);
+	writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
+	writeln("Decryption Output: ", cast(string)dec);
+}
+
+unittest
+{
+	import std.digest.digest;
+	import std.stdio;
+
+	writeln("Testing Encryption (With Additional Data)");
+
+	ubyte[32] key = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+	string input = "The quick brown fox jumps over the lazy dog.";
+	string ad = "Hello world!";
+	writefln("Encryption Input: %s - Additional Data: %s", input, ad);
+	ubyte[] enc = encrypt(key, cast(ubyte[])input, cast(ubyte[])ad);
+	writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
+
+	write("Testing Validation (With Additional Data): ");
+	assert(validate(key, enc, cast(ubyte[])ad));
+	writeln("Success!");
+
+	writeln("Testing Decryption (With Additional Data)");
+	ubyte[] dec = decrypt(key, enc, cast(ubyte[])ad);
+	writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
+	writeln("Decryption Output: ", cast(string)dec);
 }
