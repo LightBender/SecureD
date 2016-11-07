@@ -49,54 +49,30 @@ public class EllipticCurve
 		_hasPrivateKey = true;
 	}
 
-	public this(string privateKeyPath, string password)
+	public this(string privateKey, string password)
 	{
 		//Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
 		ubyte[] seedbuf = random(32);
 		RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
 
 		_hasPrivateKey = true;
+		ubyte[] pk = cast(ubyte[])privateKey;
 
-		BIO* bio = BIO_new_file(privateKeyPath.ptr, "r");
+		BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
 		PEM_read_bio_PrivateKey(bio, null, null, password !is null ?cast(ubyte*)password.ptr : null);
 		BIO_free_all(bio);
 	}
 
-	public this(string publicKeyPath)
+	public this(string publicKey)
 	{
 		//Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
 		ubyte[] seedbuf = random(32);
 		RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
 
 		_hasPrivateKey = false;
+		ubyte[] pk = cast(ubyte[])publicKey;
 
-		BIO* bio = BIO_new_file(publicKeyPath.ptr, "r");
-		key = PEM_read_bio_PUBKEY(bio, null, null, null);
-		BIO_free_all(bio);
-	}
-
-	public this(ubyte[] privateKey, string password)
-	{
-		//Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
-		ubyte[] seedbuf = random(32);
-		RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
-
-		_hasPrivateKey = true;
-
-		BIO* bio = BIO_new_mem_buf(privateKey.ptr, cast(int)privateKey.length);
-		PEM_read_bio_PrivateKey(bio, null, null, password !is null ?cast(ubyte*)password.ptr : null);
-		BIO_free_all(bio);
-	}
-
-	public this(ubyte[] publicKey)
-	{
-		//Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
-		ubyte[] seedbuf = random(32);
-		RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
-
-		_hasPrivateKey = false;
-
-		BIO* bio = BIO_new_mem_buf(publicKey.ptr, cast(int)publicKey.length);
+		BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
 		key = PEM_read_bio_PUBKEY(bio, null, null, null);
 		BIO_free_all(bio);
 	}
@@ -113,9 +89,10 @@ public class EllipticCurve
 			EVP_PKEY_CTX_free(paramsctx);
 	}
 
-	public ubyte[] derive(ubyte[] peerKey)
+	public ubyte[] derive(string peerKey)
 	{
-		BIO* bio = BIO_new_mem_buf(peerKey.ptr, cast(int)peerKey.length);
+		ubyte[] pk = cast(ubyte[])peerKey;
+		BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
 		EVP_PKEY* peer = PEM_read_bio_PUBKEY(bio, null, null, null);
 		BIO_free_all(bio);
 
@@ -194,35 +171,7 @@ public class EllipticCurve
 		return false;
 	}
 
-	public void save(string path, string password, bool use3Des = false)
-	{
-		BIO* bio = BIO_new_file(path.ptr, "w");
-
-		if (!_hasPrivateKey)
-		{
-			PEM_write_bio_PUBKEY(bio, key);
-		}
-		else
-		{
-			if (password is null)
-				PEM_write_bio_PrivateKey(bio, key, null, null, 0, null, null);
-			else
-			{
-				PEM_write_bio_PrivateKey(
-					bio,
-					key,
-					!use3Des ? EVP_aes_256_ctr() : EVP_des_ede3_cbc(),
-					cast(ubyte*)password.ptr,
-					cast(int)password.length,
-					null,
-					null);
-			}
-		}
-
-		BIO_free_all(bio);
-	}
-
-	public ubyte[] getPublicKey()
+	public string getPublicKey()
 	{
 		BIO* bio = BIO_new(BIO_s_mem());
 
@@ -232,10 +181,10 @@ public class EllipticCurve
 		BIO_read(bio, buffer.ptr, cast(int)buffer.length);
 		BIO_free_all(bio);
 
-		return buffer;
+		return cast(string)buffer;
 	}
 
-	public ubyte[] getPrivateKey(string password, bool use3Des = false)
+	public string getPrivateKey(string password, bool use3Des = false)
 	{
 		if (!_hasPrivateKey)
 			return null;
@@ -260,7 +209,7 @@ public class EllipticCurve
 		BIO_read(bio, buffer.ptr, cast(int)buffer.length);
 		BIO_free_all(bio);
 
-		return buffer;
+		return cast(string)buffer;
 	}
 }
 
@@ -273,7 +222,7 @@ unittest
 	EllipticCurve localKey = new EllipticCurve();
 	EllipticCurve peerKey = new EllipticCurve();
 
-	ubyte[] peer = peerKey.getPublicKey();
+	string peer = peerKey.getPublicKey();
 	ubyte[] key = localKey.derive(peer);
 	writeln("Derived Key: ", toHexString!(LetterCase.lower)(key));
 
