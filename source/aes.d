@@ -108,7 +108,6 @@ unittest
 {
 	import std.digest.digest;
 	import std.stdio;
-	import std.conv;
 
 	writeln("Testing Encryption (No Additional Data)");
 

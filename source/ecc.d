@@ -30,20 +30,20 @@ public class EllipticCurve
 		paramsctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, null);
 		if (paramsctx is null)
 			throw new CryptographicException("Cannot get an OpenSSL public key context.");
-		if (!EVP_PKEY_paramgen_init(paramsctx))
+		if (EVP_PKEY_paramgen_init(paramsctx) < 1)
 			throw new CryptographicException("Cannot initialize the OpenSSL public key context.");
-		if (!EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, NID_secp384r1))
+		if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, NID_secp384r1) < 1)
 			throw new CryptographicException("Cannot set the required curve: P-384.");
-		if (!EVP_PKEY_paramgen(paramsctx, &params))
+		if (EVP_PKEY_paramgen(paramsctx, &params) < 1)
 			throw new CryptographicException("Unable to generate the key parameters.");
 
 		//Generate the public and private keys
 		keyctx = EVP_PKEY_CTX_new(params, null);
 		if (keyctx is null)
 			throw new CryptographicException("Cannot get an OpenSSL private key context.");
-		if (EVP_PKEY_keygen_init(keyctx) <= 0)
+		if (EVP_PKEY_keygen_init(keyctx) < 1)
 			throw new CryptographicException("Cannot initialize the OpenSSL private key context.");
-		if (EVP_PKEY_keygen(keyctx, &key))
+		if (EVP_PKEY_keygen(keyctx, &key) < 1)
 			throw new CryptographicException("Unable to generate the private key.");
 
 		_hasPrivateKey = true;
@@ -115,8 +115,9 @@ public class EllipticCurve
 
 	public ubyte[] derive(ubyte[] peerKey)
 	{
-		const(ubyte)* pk = cast(const(ubyte)*)peerKey.ptr;
-		EVP_PKEY* peer = b2i_PublicKey(&pk, cast(long)peerKey.length);
+		BIO* bio = BIO_new_mem_buf(peerKey.ptr, cast(int)peerKey.length);
+		EVP_PKEY* peer = PEM_read_bio_PUBKEY(bio, null, null, null);
+		BIO_free_all(bio);
 
 		//Initialize the key derivation context.
 		EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(key, null);
@@ -236,10 +237,10 @@ public class EllipticCurve
 
 	public ubyte[] getPrivateKey(string password, bool use3Des = false)
 	{
-		BIO* bio = BIO_new(BIO_s_mem());
-
 		if (!_hasPrivateKey)
 			return null;
+
+		BIO* bio = BIO_new(BIO_s_mem());
 
 		if (password is null)
 			PEM_write_bio_PrivateKey(bio, key, null, null, 0, null, null);
@@ -261,4 +262,20 @@ public class EllipticCurve
 
 		return buffer;
 	}
+}
+
+unittest
+{
+	import std.digest.digest;
+
+	writeln("Testing PKI Key Derivation:");
+
+	EllipticCurve localKey = new EllipticCurve();
+	EllipticCurve peerKey = new EllipticCurve();
+
+	ubyte[] peer = peerKey.getPublicKey();
+	ubyte[] key = localKey.derive(peer);
+	writeln("Derived Key: ", toHexString!(LetterCase.lower)(key));
+
+	assert(key !is null);
 }
