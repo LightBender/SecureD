@@ -1,12 +1,15 @@
 module secured.ecc;
 
 import std.stdio;
-import deimos.openssl.ec;
+import std.string;
+
 import deimos.openssl.evp;
 import deimos.openssl.rand;
 import deimos.openssl.pem;
 import deimos.openssl.bio;
 
+import secured.hash;
+import secured.kdf;
 import secured.random;
 import secured.util;
 
@@ -59,7 +62,17 @@ public class EllipticCurve
 		ubyte[] pk = cast(ubyte[])privateKey;
 
 		BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-		PEM_read_bio_PrivateKey(bio, null, null, password !is null ?cast(ubyte*)password.ptr : null);
+		if (password is null)
+		{
+			key = PEM_read_bio_PrivateKey(bio, null, null, null);
+		}
+		else
+		{
+			ubyte[] pwd = cast(ubyte[])password;
+			pwd = pwd ~ '\0';
+
+			key = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
+		}
 		BIO_free_all(bio);
 	}
 
@@ -118,57 +131,56 @@ public class EllipticCurve
 
 	public ubyte[] sign(ubyte[] data, bool useSha256 = false)
 	{
-		EVP_MD_CTX* mdctx = null;
+		EVP_PKEY_CTX* pkeyctx = null;
 
-		mdctx = EVP_MD_CTX_create();
-		if (mdctx is null)
-			throw new CryptographicException("Unable to create the message digest context.");
+		pkeyctx = EVP_PKEY_CTX_new(key, null);
+		if (pkeyctx is null)
+			throw new CryptographicException("Unable to create the key signing context.");
 		scope(exit)
 		{
-			if (mdctx !is null)
-				EVP_MD_CTX_destroy(mdctx);
+			if (pkeyctx !is null)
+				EVP_PKEY_CTX_free(pkeyctx);
 		}
 
-		if (EVP_SignInit_ex(mdctx, !useSha256 ? EVP_sha384() : EVP_sha256(), null) != 1)
-			throw new CryptographicException("Unable to initialize the signing operation.");
+		if (EVP_PKEY_sign_init(pkeyctx) <= 0)
+			throw new CryptographicException("Unable to initialize the signing digest.");
 
-		if (EVP_SignUpdate(mdctx, data.ptr, cast(long)data.length) != 1)
-			throw new CryptographicException("Unable to update the signing data.");
+		if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
+			throw new CryptographicException("Unable to set the signing digest.");
 
-		uint signlen = 0;
-		if (EVP_SignFinal(mdctx, null, &signlen, key) != 1)
-			throw new CryptographicException("Unable to sign the data.");
+		ulong signlen = 0;
+		if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0)
+			throw new CryptographicException("Unable to calculate signature length.");
 
 		ubyte[] sign = new ubyte[signlen];
-		if (EVP_SignFinal(mdctx, sign.ptr, &signlen, key) != 1)
-			throw new CryptographicException("Unable to sign the data.");
+		if (EVP_PKEY_sign(pkeyctx, sign.ptr, &signlen, data.ptr, data.length) <= 0)
+			throw new CryptographicException("Unable to calculate signature.");
 
 		return sign;
 	}
 
 	public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
 	{
-		EVP_MD_CTX* mdctx = null;
+		EVP_PKEY_CTX* pkeyctx = null;
 
-		mdctx = EVP_MD_CTX_create();
-		if (mdctx is null)
-			throw new CryptographicException("Unable to create the message digest context.");
+		pkeyctx = EVP_PKEY_CTX_new(key, null);
+		if (pkeyctx is null)
+			throw new CryptographicException("Unable to create the key signing context.");
 		scope(exit)
 		{
-			if (mdctx !is null)
-				EVP_MD_CTX_destroy(mdctx);
+			if (pkeyctx !is null)
+				EVP_PKEY_CTX_free(pkeyctx);
 		}
 
-		if (EVP_VerifyInit_ex(mdctx, !useSha256 ? EVP_sha384() : EVP_sha256(), null) != 1)
-			throw new CryptographicException("Unable to initialize the signing operation.");
+		if (EVP_PKEY_verify_init(pkeyctx) <= 0)
+			throw new CryptographicException("Unable to initialize the signing digest.");
 
-		if (EVP_VerifyUpdate(mdctx, data.ptr, cast(long)data.length) != 1)
-			throw new CryptographicException("Unable to update the signing data.");
+		if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
+			throw new CryptographicException("Unable to set the signing digest.");
 
-		if (EVP_VerifyFinal(mdctx, signature.ptr, cast(uint)signature.length, key) == 1)
-			return true;
+		int ret = EVP_PKEY_verify(pkeyctx, data.ptr, cast(long)data.length, signature.ptr, cast(long)signature.length);
 
-		return false;
+		return ret != 1;
 	}
 
 	public string getPublicKey()
@@ -184,7 +196,7 @@ public class EllipticCurve
 		return cast(string)buffer;
 	}
 
-	public string getPrivateKey(string password, bool use3Des = false)
+	public string getPrivateKey(string password, int iterations = 25000, bool use3Des = false)
 	{
 		if (!_hasPrivateKey)
 			return null;
@@ -192,18 +204,24 @@ public class EllipticCurve
 		BIO* bio = BIO_new(BIO_s_mem());
 
 		if (password is null)
-			PEM_write_bio_PrivateKey(bio, key, null, null, 0, null, null);
+			PEM_write_bio_PKCS8PrivateKey(bio, key, null, null, 0, null, null);
 		else
 		{
-			PEM_write_bio_PrivateKey(
+			ubyte[] pwd = cast(ubyte[])password;
+			pwd = pwd ~ '\0';
+
+			PEM_write_bio_PKCS8PrivateKey(
 				bio,
 				key,
-				!use3Des ? EVP_aes_256_ctr() : EVP_des_ede3_cbc(),
-				cast(ubyte*)password.ptr,
-				cast(int)password.length,
+				!use3Des ? EVP_aes_256_cbc() : EVP_des_ede3_cbc(),
 				null,
-				null);
+				0,
+				null,
+				pwd.ptr);
 		}
+
+		if(BIO_ctrl_pending(bio) == 0)
+			throw new CryptographicException("No private key written.");
 
 		ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
 		BIO_read(bio, buffer.ptr, cast(int)buffer.length);
@@ -217,14 +235,68 @@ unittest
 {
 	import std.digest.digest;
 
-	writeln("Testing PKI Key Derivation:");
+	writeln("Testing EllipticCurve Key Derivation:");
 
-	EllipticCurve localKey = new EllipticCurve();
-	EllipticCurve peerKey = new EllipticCurve();
+	EllipticCurve eckey1 = new EllipticCurve();
+	EllipticCurve eckey2 = new EllipticCurve();
 
-	string peer = peerKey.getPublicKey();
-	ubyte[] key = localKey.derive(peer);
-	writeln("Derived Key: ", toHexString!(LetterCase.lower)(key));
+	string pubKey1 = eckey1.getPublicKey();
+	string pubKey2 = eckey2.getPublicKey();
+	ubyte[] key1 = eckey1.derive(pubKey2);
+	ubyte[] key2 = eckey2.derive(pubKey1);
 
-	assert(key !is null);
+	writeln("Derived Key 1: ", toHexString!(LetterCase.lower)(key1));
+	writeln("Derived Key 2: ", toHexString!(LetterCase.lower)(key2));
+
+	assert(key1 !is null);
+	assert(key2 !is null);
+	assert(constantTimeEquality(key1, key2));
+}
+
+unittest
+{
+	import std.digest.digest;
+
+	writeln("Testing EllipticCurve Signing/Verification:");
+
+	EllipticCurve eckey = new EllipticCurve();
+	ubyte[48] data = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+	ubyte[] sig = eckey.sign(data);
+	writeln("Signature: ", toHexString!(LetterCase.lower)(sig));
+	assert(eckey.verify(data, sig));
+}
+
+unittest
+{
+	import std.digest.digest;
+
+	writeln("Testing EllipticCurve Private Key Extraction/Recreation:");
+
+	EllipticCurve eckey = new EllipticCurve();
+	string pkPwd = eckey.getPrivateKey("Test Password");
+	string pkNoPwd = eckey.getPrivateKey(null);
+
+	writeln("Private Key Without Password: ");
+	writeln(pkNoPwd);
+	writeln("Private Key With Password:");
+	writeln(pkPwd);
+
+	assert(pkNoPwd !is null);
+	assert(pkPwd !is null);
+
+	EllipticCurve eckeyr1 = new EllipticCurve(pkNoPwd, null);
+	EllipticCurve eckeyr2 = new EllipticCurve(pkPwd, "Test Password");
+
+	string pkRecPwd = eckeyr2.getPrivateKey("Test Password");
+	string pkRecNoPwd = eckeyr1.getPrivateKey(null);
+
+	writeln("Recreated Private Key Without Password: ");
+	writeln(pkRecNoPwd);
+	writeln("Recreated Private Key With Password:");
+	writeln(pkRecPwd);
+
+	assert(pkNoPwd == pkRecNoPwd);
 }

@@ -1,17 +1,20 @@
 module secured.threading;
 
 import deimos.openssl.crypto;
+import deimos.openssl.evp;
 import core.thread;
 
 shared static this()
 {
 	CRYPTO_set_locking_callback(&thread_locking_function);
 	CRYPTO_set_id_callback(&thread_id_function);
+	OpenSSL_add_all_algorithms();
 }
 shared static ~this()
 {
 	CRYPTO_set_locking_callback(null);
 	CRYPTO_set_id_callback(null);
+	EVP_cleanup();
 }
 
 extern(C) public static void thread_locking_function(int mode, int n, const(char)* file, int line)
