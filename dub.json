@@ -9,6 +9,5 @@
 	"targetType": "library",
 	"description": "A cryptography library for D that encourages secure implementations through simple interfaces.",
 	"copyright": "Copyright © 2016, Adam Wilson",
-	"license": "BSL-1.0",
-	"lflags": ["-L/usr/local/opt/openssl/lib/"]
+	"license": "BSL-1.0"
 }
