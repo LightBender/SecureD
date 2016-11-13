@@ -4,30 +4,30 @@ SecureD is a cryptography library for D that is designed to make working with cr
 
 ## Design Philosophy
 
-### Developer-Friendly Misuse-Resistant API:
+### Developer-Friendly Misuse-Resistant API
 One of the largest problems with most cryptography libraries available today is that their API's practically encourage broken implementations.
 
-### Safe by design:
+### Safe by Design
 Use only safe algorithms with safe modes. Make conservative choices in the implementation
 
-### Do no re-implement cryptography algorithms:
+### Do no re-implement Cryptography Algorithms
 Use industry standard libraries instead. SecureD is based on OpenSSL.
 
-### Minimal Code:
+### Minimal Code
 Keep the code to a minimum. This ensures high-maintainability and eases understanding of the code.
 
-### Unittesting:
+### Unittesting
 All API's are unittested using D's built in unittests. Any developer can verify the implementation with a simple 'dub test' command. This ensures that the library will perform as advertised.
 
 ## Algorithms
 
-HASH:				SHA2-384
-HMAC:				SHA2-384
-KDF:				PBKDF2 (HMAC/SHA2-384)
-AEAD Symmetric: 	AES-256-CTR-HMAC384
-Asymmetric:			ECC-P384 (Key Derivation + Sign/Verify with SHA2-384)
-RNG: 				System RNG on POSIX and Windows
-OTHER: 				Constant Time Equality
+- HASH:				SHA2-384
+- HMAC:				SHA2-384
+- KDF:				PBKDF2 (HMAC/SHA2-384)
+- AEAD Symmetric: 	AES-256-CTR-HMAC384
+- Asymmetric:		ECC-P384 (Key Derivation + Sign/Verify with SHA2-384)
+- RNG: 				System RNG on POSIX and Windows
+- OTHER: 			Constant Time Equality
 
 ## Why these Algorithms?
 
