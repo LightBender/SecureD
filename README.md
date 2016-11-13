@@ -7,7 +7,7 @@ SecureD is a cryptography library for D that is designed to make working with cr
 ### Developer-Friendly Misuse-Resistant API
 One of the largest problems with most cryptography libraries available today is that their API's practically encourage broken implementations.
 
-## Focus on Data Storage
+### Focus on Data Storage
 The primary intended use case for this library is for long-term data storage. It is not to be an SSL or communications cryptography library.
 
 ### Safe by Design
