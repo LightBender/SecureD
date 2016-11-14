@@ -3,11 +3,25 @@
 	"authors": [
 		"Adam Wilson"
 	],
-	"dependencies": {
-		"openssl": "~>1.1.4"
-	},
+
 	"targetType": "library",
 	"description": "A cryptography library for D that encourages secure implementations through simple interfaces.",
 	"copyright": "Copyright © 2016, Adam Wilson",
-	"license": "BSL-1.0"
+	"license": "BSL-1.0",
+	"configurations": [
+		{
+			"name": "library",
+			"versions": ["OpenSSL"],
+			"dependencies": {
+				"openssl": "~>1.1.5"
+			}
+		},
+		{
+			"name": "botan",
+			"versions": ["Botan"],
+			"dependencies": {
+				"botan": "~>1.12.7"
+			}
+		}
+	]
 }
