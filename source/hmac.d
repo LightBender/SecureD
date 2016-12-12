@@ -1,8 +1,16 @@
 module secured.hmac;
 
 import std.stdio;
-import deimos.openssl.evp;
 
+version(OpenSSL)
+{
+import deimos.openssl.evp;
+}
+version(Botan)
+{
+import botan.mac.hmac;
+import botan.hash.sha2_64;
+}
 import secured.util;
 
 public ubyte[] hmac(ubyte[] key, ubyte[] data)
@@ -12,38 +20,57 @@ in
 }
 body
 {
-	//Create the OpenSSL context
-	EVP_MD_CTX *mdctx = EVP_MD_CTX_create();
-	if (mdctx == null)
-		throw new CryptographicException("Unable to create OpenSSL context.");
-	scope(exit)
-		if(mdctx !is null)
-			EVP_MD_CTX_destroy(mdctx);
+	version(OpenSSL)
+	{
+		//Create the OpenSSL context
+		EVP_MD_CTX *mdctx = EVP_MD_CTX_create();
+		if (mdctx == null)
+			throw new CryptographicException("Unable to create OpenSSL context.");
+		scope(exit)
+			if(mdctx !is null)
+				EVP_MD_CTX_destroy(mdctx);
 
-	//Initialize the SHA-384 algorithm
-	const(EVP_MD)* md = EVP_sha384();
-	if (EVP_DigestInit_ex(mdctx, md, null) != 1)
-		throw new CryptographicException("Unable to create SHA-384 hash context.");
+		//Initialize the SHA-384 algorithm
+		const(EVP_MD)* md = EVP_sha384();
+		if (EVP_DigestInit_ex(mdctx, md, null) != 1)
+			throw new CryptographicException("Unable to create SHA-384 hash context.");
 
-	//Create the HMAC key context
-	auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
-	scope(exit)
-		if(pkey !is null)
-			EVP_PKEY_free(pkey);
-	if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1)
-		throw new CryptographicException("Unable to create SHA-384 HMAC key context.");
+		//Create the HMAC key context
+		auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
+		scope(exit)
+			if(pkey !is null)
+				EVP_PKEY_free(pkey);
+		if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1)
+			throw new CryptographicException("Unable to create SHA-384 HMAC key context.");
 
-	//Run the provided data through the digest algorithm
-	if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
-		throw new CryptographicException("Error while updating digest.");
+		//Run the provided data through the digest algorithm
+		if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
+			throw new CryptographicException("Error while updating digest.");
 
-	//Copy the OpenSSL digest to our D buffer.
-	ulong digestlen;
-	ubyte[] digest = new ubyte[48];
-	if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0)
-		throw new CryptographicException("Error while retrieving the digest.");
+		//Copy the OpenSSL digest to our D buffer.
+		ulong digestlen;
+		ubyte[] digest = new ubyte[48];
+		if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0)
+			throw new CryptographicException("Error while retrieving the digest.");
 
-	return digest;
+		return digest;
+	}
+
+	version(Botan)
+	{
+		auto sha = new HMAC(new SHA384());
+		scope(exit)
+			sha.clear();
+		sha.setKey(key.ptr, key.length);
+
+		sha.update(data);
+
+		auto digestvec = sha.finished();
+		ubyte[] digest = new ubyte[digestvec.length];
+		for(int i = 0; i<digestvec.length; i++)
+			digest[i] = digestvec[i];
+		return digest;
+	}
 }
 
 unittest {
@@ -81,41 +108,63 @@ body
 		if(fsfile.isOpen())
 			fsfile.close();
 
-	//Create the OpenSSL context
-	EVP_MD_CTX *mdctx = EVP_MD_CTX_create();
-	if (mdctx == null)
-		throw new CryptographicException("Unable to create OpenSSL context.");
-	scope(exit)
-		if(mdctx !is null)
-			EVP_MD_CTX_destroy(mdctx);
-
-	//Initialize the SHA-384 algorithm
-	const(EVP_MD)* md = EVP_sha384();
-	if (EVP_DigestInit_ex(mdctx, md, null) != 1)
-		throw new CryptographicException("Unable to create SHA-384 hash context.");
-
-	//Create the HMAC key context
-	auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
-	scope(exit)
-		if(pkey !is null)
-			EVP_PKEY_free(pkey);
-	if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1)
-		throw new CryptographicException("Unable to create SHA-384 HMAC key context.");
-
-	//Read the file in chunks and update the Digest
-	foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE))
+	version(OpenSSL)
 	{
-		if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
-			throw new CryptographicException("Error while updating digest.");
+		//Create the OpenSSL context
+		EVP_MD_CTX *mdctx = EVP_MD_CTX_create();
+		if (mdctx == null)
+			throw new CryptographicException("Unable to create OpenSSL context.");
+		scope(exit)
+			if(mdctx !is null)
+				EVP_MD_CTX_destroy(mdctx);
+
+		//Initialize the SHA-384 algorithm
+		const(EVP_MD)* md = EVP_sha384();
+		if (EVP_DigestInit_ex(mdctx, md, null) != 1)
+			throw new CryptographicException("Unable to create SHA-384 hash context.");
+
+		//Create the HMAC key context
+		auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
+		scope(exit)
+			if(pkey !is null)
+				EVP_PKEY_free(pkey);
+		if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1)
+			throw new CryptographicException("Unable to create SHA-384 HMAC key context.");
+
+		//Read the file in chunks and update the Digest
+		foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE))
+		{
+			if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
+				throw new CryptographicException("Error while updating digest.");
+		}
+
+		//Copy the OpenSSL digest to our D buffer.
+		ulong digestlen;
+		ubyte[] digest = new ubyte[48];
+		if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0)
+			throw new CryptographicException("Error while retrieving the digest.");
+
+		return digest;
 	}
 
-	//Copy the OpenSSL digest to our D buffer.
-	ulong digestlen;
-	ubyte[] digest = new ubyte[48];
-	if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0)
-		throw new CryptographicException("Error while retrieving the digest.");
+	version(Botan)
+	{
+		auto sha = new HMAC(new SHA384());
+		scope(exit)
+			sha.clear();
+		sha.setKey(key.ptr, key.length);
 
-	return digest;
+		foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE))
+		{
+			sha.update(data);
+		}
+
+		auto digestvec = sha.finished();
+		ubyte[] digest = new ubyte[digestvec.length];
+		for(int i = 0; i<digestvec.length; i++)
+			digest[i] = digestvec[i];
+		return digest;
+	}
 }
 
 unittest {

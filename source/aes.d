@@ -1,6 +1,18 @@
 module secured.aes;
 
+version(OpenSSL)
+{
 import deimos.openssl.evp;
+}
+version(Botan)
+{
+import memutils.vector;
+import botan.stream.ctr;
+import botan.block.aes;
+import botan.block.aes_ssse3;
+import botan.block.aes_ni;
+import botan.utils.cpuid;
+}
 
 import secured.hmac;
 import secured.random;
@@ -13,33 +25,55 @@ in
 }
 body
 {
-	//Get the OpenSSL cipher context
-	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-	if (ctx is null)
-		throw new CryptographicException("Cannot get an OpenSSL cipher context.");
-	scope(exit)
-		if (ctx !is null)
-			EVP_CIPHER_CTX_free(ctx);
+	ubyte[] output = new ubyte[data.length];
 
 	//Generate a random IV
 	ubyte[] iv = random(16);
 
-	//Initialize the cipher context
-	if (EVP_EncryptInit_ex(ctx, EVP_aes_256_ctr(), null, key.ptr, iv.ptr) != 1)
-		throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
+	version(OpenSSL)
+	{
+		//Get the OpenSSL cipher context
+		EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+		if (ctx is null)
+			throw new CryptographicException("Cannot get an OpenSSL cipher context.");
+		scope(exit)
+			if (ctx !is null)
+				EVP_CIPHER_CTX_free(ctx);
 
-	//Write data to the cipher context
-	int written = 0;
-	int len = 0;
-	ubyte[] output = new ubyte[data.length];
-	if (EVP_EncryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length) != 1)
-		throw new CryptographicException("Unable to write bytes to cipher context.");
-	written += len;
+		//Initialize the cipher context
+		if (EVP_EncryptInit_ex(ctx, EVP_aes_256_ctr(), null, key.ptr, iv.ptr) != 1)
+			throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
 
-	//Extract the complete ciphertext
-	if (EVP_EncryptFinal_ex(ctx, &output[written-1], &len) != 1)
-		throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
-	written += len;
+		//Write data to the cipher context
+		int written = 0;
+		int len = 0;
+		if (EVP_EncryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length) != 1)
+			throw new CryptographicException("Unable to write bytes to cipher context.");
+		written += len;
+
+		//Extract the complete ciphertext
+		if (EVP_EncryptFinal_ex(ctx, &output[written-1], &len) != 1)
+			throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
+		written += len;
+	}
+
+	version(Botan)
+	{
+		auto payload = SecureVector!ubyte(data);
+
+		auto ctr = new CTRBE(
+			CPUID.hasAesNi() ? new AES256NI() :
+			CPUID.hasSsse3() ? new AES256_SSSE3() :
+			new AES256()
+			);
+
+		ctr.setKey(key.ptr, key.length);
+		ctr.setIv(iv.ptr, iv.length);
+		ctr.encrypt(payload);
+
+		for(int i=0; i<data.length; i++)
+			output[i]=payload[i];
+	}
 
 	//HMAC the combined cipher text
 	ubyte[] hashdata = additionalData !is null ? iv ~ output ~ additionalData : iv ~ output;
@@ -76,30 +110,51 @@ body
 
 	ubyte[] iv = data[48..64];
 	ubyte[] payload = data[64..$];
-
-	//Get the OpenSSL cipher context
-	EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-	if (ctx is null)
-		throw new CryptographicException("Cannot get an OpenSSL cipher context.");
-	scope(exit)
-		EVP_CIPHER_CTX_free(ctx);
-
-	//Initialize the cipher context
-	if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ctr(), null, key.ptr, iv.ptr) != 1)
-		throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-
-	//Write data to the cipher context
-	int written = 0;
-	int len = 0;
 	ubyte[] output = new ubyte[payload.length];
-	if (EVP_DecryptUpdate(ctx, &output[written], &len, payload.ptr, cast(int)payload.length) != 1)
-		throw new CryptographicException("Unable to write bytes to cipher context.");
-	written += len;
 
-	//Extract the complete plaintext
-	if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) != 1)
-		throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
-	written += len;
+	version(OpenSSL)
+	{
+		//Get the OpenSSL cipher context
+		EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+		if (ctx is null)
+			throw new CryptographicException("Cannot get an OpenSSL cipher context.");
+		scope(exit)
+			EVP_CIPHER_CTX_free(ctx);
+
+		//Initialize the cipher context
+		if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ctr(), null, key.ptr, iv.ptr) != 1)
+			throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
+
+		//Write data to the cipher context
+		int written = 0;
+		int len = 0;
+		if (EVP_DecryptUpdate(ctx, &output[written], &len, payload.ptr, cast(int)payload.length) != 1)
+			throw new CryptographicException("Unable to write bytes to cipher context.");
+		written += len;
+
+		//Extract the complete plaintext
+		if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) != 1)
+			throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
+		written += len;
+	}
+
+	version(Botan)
+	{
+		auto dec = SecureVector!ubyte(payload);
+
+		auto ctr = new CTRBE(
+			CPUID.hasAesNi() ? new AES256NI() :
+			CPUID.hasSsse3() ? new AES256_SSSE3() :
+			new AES256()
+			);
+
+		ctr.setKey(key.ptr, key.length);
+		ctr.setIv(iv.ptr, iv.length);
+		ctr.decrypt(dec);
+
+		for(int i=0; i<payload.length; i++)
+			output[i]=dec[i];
+	}
 
 	return output;
 }

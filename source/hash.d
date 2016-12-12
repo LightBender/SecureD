@@ -1,35 +1,61 @@
 module secured.hash;
 
 import std.stdio;
+
+version(OpenSSL)
+{
 import deimos.openssl.evp;
+}
+version(Botan)
+{
+import botan.hash.sha2_64;
+}
 
 import secured.util;
 
 public ubyte[] hash(ubyte[] data)
 {
-	//Create the OpenSSL context
-	EVP_MD_CTX *mdctx;
-	if ((mdctx = EVP_MD_CTX_create()) == null)
-		throw new CryptographicException("Unable to create OpenSSL context.");
-	scope(exit)
-		if(mdctx !is null)
-			EVP_MD_CTX_destroy(mdctx);
+	version(OpenSSL)
+	{
+		//Create the OpenSSL context
+		EVP_MD_CTX *mdctx;
+		if ((mdctx = EVP_MD_CTX_create()) == null)
+			throw new CryptographicException("Unable to create OpenSSL context.");
+		scope(exit)
+			if(mdctx !is null)
+				EVP_MD_CTX_destroy(mdctx);
 
-	//Initialize the SHA-384 algorithm
-	if (EVP_DigestInit_ex(mdctx, EVP_sha384(), null) < 0)
-		throw new CryptographicException("Unable to create SHA-384 hash context.");
+		//Initialize the SHA-384 algorithm
+		if (EVP_DigestInit_ex(mdctx, EVP_sha384(), null) < 0)
+			throw new CryptographicException("Unable to create SHA-384 hash context.");
 
-	//Run the provided data through the digest algorithm
-	if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0)
-		throw new CryptographicException("Error while updating digest.");
+		//Run the provided data through the digest algorithm
+		if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0)
+			throw new CryptographicException("Error while updating digest.");
 
-	//Copy the OpenSSL digest to our D buffer.
-	uint digestlen;
-	ubyte[] digest = new ubyte[48];
-	if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0)
-		throw new CryptographicException("Error while retrieving the digest.");
+		//Copy the OpenSSL digest to our D buffer.
+		uint digestlen;
+		ubyte[] digest = new ubyte[48];
+		if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0)
+			throw new CryptographicException("Error while retrieving the digest.");
 
-	return digest;
+		return digest;
+	}
+
+	version(Botan)
+	{
+		auto sha = new SHA384();
+		scope(exit)
+			sha.clear();
+
+		sha.update(data.ptr, data.length);
+
+		auto digestvec = sha.finished();
+		ubyte[] digest = new ubyte[digestvec.length];
+		for(int i = 0; i<digestvec.length; i++)
+			digest[i] = digestvec[i];
+		return digest;
+	}
 }
 
 unittest {
@@ -58,32 +84,54 @@ public ubyte[] hash(string path)
 		if(fsfile.isOpen())
 			fsfile.close();
 
-	//Create the OpenSSL context
-	EVP_MD_CTX *mdctx;
-	if ((mdctx = EVP_MD_CTX_create()) == null)
-		throw new CryptographicException("Unable to create OpenSSL context.");
-	scope(exit)
-		if(mdctx !is null)
-			EVP_MD_CTX_destroy(mdctx);
-
-	//Initialize the SHA-384 algorithm
-	if (EVP_DigestInit_ex(mdctx, EVP_sha384(), null) < 0)
-		throw new CryptographicException("Unable to create SHA-384 hash context.");
-
-	//Read the file in chunks and update the Digest
-	foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE))
+	version(OpenSSL)
 	{
-		if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0)
-			throw new CryptographicException("Error while updating digest.");
+		//Create the OpenSSL context
+		EVP_MD_CTX *mdctx;
+		if ((mdctx = EVP_MD_CTX_create()) == null)
+			throw new CryptographicException("Unable to create OpenSSL context.");
+		scope(exit)
+			if(mdctx !is null)
+				EVP_MD_CTX_destroy(mdctx);
+
+		//Initialize the SHA-384 algorithm
+		if (EVP_DigestInit_ex(mdctx, EVP_sha384(), null) < 0)
+			throw new CryptographicException("Unable to create SHA-384 hash context.");
+
+		//Read the file in chunks and update the Digest
+		foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE))
+		{
+			if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0)
+				throw new CryptographicException("Error while updating digest.");
+		}
+
+		//Copy the OpenSSL digest to our D buffer.
+		uint digestlen;
+		ubyte[] digest = new ubyte[48];
+		if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0)
+			throw new CryptographicException("Error while retrieving the digest.");
+
+		return digest;
 	}
 
-	//Copy the OpenSSL digest to our D buffer.
-	uint digestlen;
-	ubyte[] digest = new ubyte[48];
-	if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0)
-		throw new CryptographicException("Error while retrieving the digest.");
+	version(Botan)
+	{
+		auto sha = new SHA384();
+		scope(exit)
+			sha.clear();
 
-	return digest;
+		//Read the file in chunks and update the Digest
+		foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE))
+		{
+			sha.update(data.ptr, data.length);
+		}
+
+		auto digestvec = sha.finished();
+		ubyte[] digest = new ubyte[digestvec.length];
+		for(int i = 0; i<digestvec.length; i++)
+			digest[i] = digestvec[i];
+		return digest;
+	}
 }
 
 unittest {

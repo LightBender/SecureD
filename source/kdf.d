@@ -1,10 +1,21 @@
 module secured.kdf;
 
+version(OpenSSL)
+{
 import deimos.openssl.evp;
+}
+
+version(Botan)
+{
+import botan.hash.sha2_64;
+import botan.mac.hmac;
+import botan.pbkdf.pbkdf2;
+import core.time;
+}
 
 import secured.util;
 
-public ubyte[] pbkdf2(ubyte[] key, string password, int iterations = 25000, int outputLen = 48)
+public ubyte[] pbkdf2(ubyte[] key, string password, uint iterations = 25000, uint outputLen = 48)
 in
 {
 	assert(key.length == 48, "The key must be 48 bytes in length.");
@@ -12,11 +23,26 @@ in
 }
 body
 {
-	ubyte[] output = new ubyte[outputLen];
-	if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, key.ptr, cast(int)key.length, iterations, EVP_sha384(), outputLen, output.ptr) == 0)
-		throw new CryptographicException("Unable to execute PBKDF2 hash function.");
+	version(OpenSSL)
+	{
+		ubyte[] output = new ubyte[outputLen];
+		if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, key.ptr, cast(int)key.length, iterations, EVP_sha384(), outputLen, output.ptr) == 0)
+			throw new CryptographicException("Unable to execute PBKDF2 hash function.");
+		return output;
+	}
 
-	return output;
+	version(Botan)
+	{
+		auto kdf = new PKCS5_PBKDF2(new HMAC(new SHA384()));
+		auto result = kdf.keyDerivation(cast(ulong)outputLen, cast(const(string))password, key.ptr, key.length, cast(ulong)iterations, Duration.zero);
+		auto octet = result.second();
+
+		ubyte[] output = new ubyte[octet.length()];
+		ubyte* octetptr = octet.ptr();
+		for(int i = 0; i < octet.length(); i++)
+			output[i] = octetptr[i];
+		return output;
+	}
 }
 
 unittest

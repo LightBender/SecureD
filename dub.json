@@ -20,7 +20,7 @@
 			"name": "botan",
 			"versions": ["Botan"],
 			"dependencies": {
-				"botan": "~>1.12.7"
+				"botan": "~>1.12.8"
 			}
 		}
 	]
