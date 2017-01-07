@@ -5,4 +5,4 @@ d:
     - ldc
 
 script:
-    - dub test --config=library
+    - dub test --config=library --compiler=$DC
