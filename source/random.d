@@ -2,7 +2,7 @@ module secured.random;
 
 import secured.util;
 
-public ubyte[] random(uint bytes)
+@trusted public ubyte[] random(uint bytes)
 {
 	if (bytes == 0)
 	{

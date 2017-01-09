@@ -18,7 +18,7 @@ import secured.hmac;
 import secured.random;
 import secured.util;
 
-public ubyte[] encrypt (ubyte[] key, ubyte[] data, ubyte[] additionalData)
+@trusted public ubyte[] encrypt (ubyte[] key, ubyte[] data, ubyte[] additionalData)
 in
 {
 	assert(key.length == 32, "Encryption key must be 32 bytes in length.");
@@ -83,7 +83,7 @@ body
 	return hash ~ iv ~ output;
 }
 
-public bool validate (ubyte[] key, ubyte[] data, ubyte[] additionalData)
+@trusted public bool validate (ubyte[] key, ubyte[] data, ubyte[] additionalData)
 in
 {
 	assert(key.length == 32, "Encryption key must be 32 bytes in length.");
@@ -97,7 +97,7 @@ body
 	return constantTimeEquality(datahash, computed);
 }
 
-public ubyte[] decrypt (ubyte[] key, ubyte[] data, ubyte[] additionalData)
+@trusted public ubyte[] decrypt (ubyte[] key, ubyte[] data, ubyte[] additionalData)
 in
 {
 	assert(key.length == 32, "Encryption key must be 32 bytes in length.");

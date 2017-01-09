@@ -13,7 +13,7 @@ import botan.hash.sha2_64;
 
 import secured.util;
 
-public ubyte[] hash(ubyte[] data)
+@trusted public ubyte[] hash(ubyte[] data)
 {
 	version(OpenSSL)
 	{
@@ -76,7 +76,7 @@ unittest {
 	assert(toHexString!(LetterCase.lower)(vec3) == "3391fdddfc8dc7393707a65b1b4709397cf8b1d162af05abfe8f450de5f36bc6b0455a8520bc4e6f5fe95b1fe3c8452b");
 }
 
-public ubyte[] hash(string path)
+@trusted public ubyte[] hash(string path)
 {
 	//Open the file for reading
 	auto fsfile = File(path, "rb");

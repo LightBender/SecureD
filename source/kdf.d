@@ -15,7 +15,7 @@ import core.time;
 
 import secured.util;
 
-public ubyte[] pbkdf2(ubyte[] key, string password, uint iterations = 25000, uint outputLen = 48)
+@trusted public ubyte[] pbkdf2(ubyte[] key, string password, uint iterations = 25000, uint outputLen = 48)
 in
 {
 	assert(key.length == 48, "The key must be 48 bytes in length.");

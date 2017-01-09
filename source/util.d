@@ -2,7 +2,7 @@ module secured.util;
 
 public enum uint FILE_BUFFER_SIZE = 32768;
 
-public class CryptographicException : Exception
+@safe public class CryptographicException : Exception
 {
 	this(string message)
 	{
@@ -10,7 +10,7 @@ public class CryptographicException : Exception
 	}
 }
 
-public bool constantTimeEquality(ubyte[] a, ubyte[] b)
+@safe public bool constantTimeEquality(ubyte[] a, ubyte[] b)
 {
 	if(a.length != b.length)
 		return false;

@@ -26,6 +26,8 @@ import secured.kdf;
 import secured.random;
 import secured.util;
 
+@trusted:
+
 public class EllipticCurve
 {
 	version(OpenSSL)

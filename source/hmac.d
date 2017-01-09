@@ -13,7 +13,7 @@ import botan.hash.sha2_64;
 }
 import secured.util;
 
-public ubyte[] hmac(ubyte[] key, ubyte[] data)
+@trusted public ubyte[] hmac(ubyte[] key, ubyte[] data)
 in
 {
 	assert(key.length <= 48, "HMAC key must be less than or equal to 48 bytes in length.");
@@ -95,7 +95,7 @@ unittest {
 	assert(toHexString!(LetterCase.lower)(vec3) == "460b59c0bd8ae48133431185a4583376738be3116cafce47aff7696bd19501b0cf1f1850c3e5fa2992882997493d1c99");
 }
 
-public ubyte[] hmac(ubyte[] key, string path)
+@trusted public ubyte[] hmac(ubyte[] key, string path)
 in
 {
 	assert(key.length <= 48, "HMAC key must be less than or equal to 48 bytes in length.");
