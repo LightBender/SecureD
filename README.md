@@ -2,6 +2,8 @@
 
 SecureD is a cryptography library for D that is designed to make working with cryptography simple. Simplicity encourages the developers to use cryptography in a safe and correct manner.
 
+[![Build Status](https://travis-ci.org/LightBender/SecureD.svg?branch=master)](https://travis-ci.org/LightBender/SecureD)
+
 ## Design Philosophy
 
 ### Developer-Friendly Misuse-Resistant API
