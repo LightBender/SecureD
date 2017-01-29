@@ -1,9 +1,3 @@
-// Adam Williams 2016-2017
-
-// Implements evp encrypting and decrypting functionality using only RSA.
-// Implements sealing and opening envelope functionality using a combination of RSA and AES.
-// This file depends on the openssl library. Please note: Currently no support for the Botan library.
-
 module secured.rsa;  
 
 import core.memory;
@@ -17,18 +11,18 @@ import deimos.openssl.bio;
 import deimos.openssl.rsa;
 import deimos.openssl.engine;
 }
+
 version(Botan)
 {
-	static assert(0, "Botan is not support in module secured.rsa");
+	static assert(0, "Botan is currently not support in module secured.rsa.");
 }
 
 import secured.random;
 import secured.util;
 
-// CONSTANTS
-const ulong RSA_KEYLEN = 2048;
-
 // ----------------------------------------------------------
+
+@trusted:
 
 public class RSA
 {
@@ -37,7 +31,7 @@ public class RSA
 
 	static EVP_PKEY *keypair;
 
-	public this()
+	public this(const int RSA_KEYLEN = 4096)
 	{ 
 		// Reseed the OpenSSL RNG every time we create a new RSA Key to ensure that the result is truely random in threading/forking scenarios.
 		ubyte[] seedbuf = random(32);
@@ -46,6 +40,11 @@ public class RSA
 		EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, null);
 		if (ctx is null)
 			throw new CryptographicException("EVP_PKEY_CTX_new_id failed.");
+		scope(exit)
+		{
+			if (ctx !is null)
+				EVP_PKEY_CTX_free(ctx);
+		}
 
 		if(EVP_PKEY_keygen_init(ctx) <= 0)
 			throw new CryptographicException("EVP_PKEY_keygen_init failed.");
@@ -56,7 +55,7 @@ public class RSA
 		if(EVP_PKEY_keygen(ctx, &keypair) <= 0) 
 			throw new CryptographicException("EVP_PKEY_keygen failed.");
 
-		EVP_PKEY_CTX_free(ctx);
+		// EVP_PKEY_CTX_free(ctx);
 
 		_hasPrivateKey = true;
 	} // this()
@@ -107,10 +106,7 @@ public class RSA
 
 	public ~this()
 	{
-		// ToDo: Should these lines be included? Investigate!
-		// if (keypair !is null)
-		//	EVP_PKEY_free(keypair);
-	}
+	} // ~this()
 
 // ---------------------------------------------------------- // ----------------------------------------------------------
 
@@ -129,6 +125,7 @@ public class RSA
 		size_t* ivl		= &_ivl;
 		
 		// The header, symmetric encryption key ek and initialisation vector iv are prefixed the encrypted message
+		// Having four length bytes in header imposes a 4 GB limit on the plaintext
 
 		const ubyte* msg	= plaintext.ptr;
 		size_t msgLen 		= plaintext.length;
@@ -157,6 +154,11 @@ public class RSA
 		EVP_CIPHER_CTX *rsaEncryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
 		if(rsaEncryptCtx == null)
 			throw new CryptographicException("Malloc failed.");
+		scope(exit)
+		{
+			if (rsaEncryptCtx !is null)
+				EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
+		}
 
 		EVP_CIPHER_CTX_init(rsaEncryptCtx);
 
@@ -224,6 +226,11 @@ public class RSA
 		EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
 		if(rsaDecryptCtx == null)
 			throw new CryptographicException("Malloc failed.");
+		scope(exit)
+		{
+			if (rsaDecryptCtx !is null)
+				EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);
+		}
 
 		EVP_CIPHER_CTX_init(rsaDecryptCtx);
 
@@ -238,12 +245,10 @@ public class RSA
 			throw new CryptographicException("EVP_OpenFinal failed.");
 		decLen += blockLen;
 
-		EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);
-
 		return (*decMsg)[0 .. decLen];
 	} // open()
 
-// ----------------------------------------------------------
+// ---------------------------------------------------------- // ----------------------------------------------------------
 
 	ubyte[] getPublicKey()
 	{
@@ -294,9 +299,15 @@ public class RSA
 		return buffer;
 	} // getPrivateKey()
 
-// ----------------------------------------------------------
+// ---------------------------------------------------------- // ----------------------------------------------------------
 
 	ubyte[] encrypt(const ubyte[] inMessage)
+	in
+	{
+		import std.exception: enforce;
+		enforce(inMessage.length <= (EVP_PKEY_size(keypair) - 42), new CryptographicException("Plainttext length exceeds allowance")); // 42 being the padding overhead for OAEP padding using SHA-1
+	}
+	body
 	{
 		EVP_PKEY_CTX *ctx;
 		ENGINE *eng = null; // Use default RSA implementation
@@ -308,6 +319,11 @@ public class RSA
 		ctx = EVP_PKEY_CTX_new(keypair,eng);
 		if (!ctx) 
 			throw new CryptographicException("EVP_PKEY_CTX_new.");
+		scope(exit)
+		{
+			if (ctx !is null)
+				EVP_PKEY_CTX_free(ctx);
+		}
 		
 		if (EVP_PKEY_encrypt_init(ctx) <= 0)
 			throw new CryptographicException("EVP_PKEY_encrypt_init failed.");
@@ -324,15 +340,18 @@ public class RSA
 			
 		if (EVP_PKEY_encrypt(ctx, out2, &outlen, in2, inlen) <= 0)
 			throw new CryptographicException("EVP_PKEY_encrypt failed.");
-
-		EVP_PKEY_CTX_free(ctx);
-		
+				
 		return (out2)[0 .. outlen];
 	} // encrypt()
 
 // ----------------------------------------------------------
 
 	ubyte[] decrypt(const ubyte[] inMessage)
+	in
+	{
+		assert(inMessage.length == EVP_PKEY_size(keypair));  // Should always hold as padding was added during encryption
+	}
+	body
 	{
 		EVP_PKEY_CTX *ctx;
 		ENGINE *eng = null; // Use default RSA implementation
@@ -344,6 +363,11 @@ public class RSA
 		ctx = EVP_PKEY_CTX_new(keypair,eng);
 		if (!ctx) 
 			throw new CryptographicException("EVP_PKEY_CTX_new failed");
+		scope(exit)
+		{
+			if (ctx !is null)
+				EVP_PKEY_CTX_free(ctx);
+		}
 		
 		if (EVP_PKEY_decrypt_init(ctx) <= 0)
 			throw new CryptographicException("EVP_PKEY_decrypt_init failed.");
@@ -361,22 +385,91 @@ public class RSA
 		if (EVP_PKEY_decrypt(ctx, out2, &outlen, in2, inlen) <= 0)
 			throw new CryptographicException("EVP_PKEY_encrypt failed.");
 
-		EVP_PKEY_CTX_free(ctx);
-
 		return (out2)[0 .. outlen];
 	} // decrypt()
 
-} // class RSA
+// ---------------------------------------------------------- // ----------------------------------------------------------
+
+	public ubyte[] sign(ubyte[] data, bool useSha256 = false)
+	out (signature)
+	{
+		assert(signature.length == EVP_PKEY_size(keypair));
+	}
+	body
+	{
+		EVP_PKEY_CTX* pkeyctx = null;
+
+		pkeyctx = EVP_PKEY_CTX_new(keypair, null);
+		if (pkeyctx is null)
+			throw new CryptographicException("Unable to create the key signing context.");
+		scope(exit)
+		{
+			if (pkeyctx !is null)
+				EVP_PKEY_CTX_free(pkeyctx);
+		}
+
+		if (EVP_PKEY_sign_init(pkeyctx) <= 0)
+			throw new CryptographicException("Unable to initialize the signing digest.");
+
+		if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
+			throw new CryptographicException("Unable to set the signing digest.");
+
+		ulong signlen = 0;
+		if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0)
+			throw new CryptographicException("Unable to calculate signature length.");
+
+		ubyte[] sign = new ubyte[signlen];
+		if (EVP_PKEY_sign(pkeyctx, sign.ptr, &signlen, data.ptr, data.length) <= 0)
+			throw new CryptographicException("Unable to calculate signature.");
+
+		return sign;
+	} // sign()
 
 // ----------------------------------------------------------
+
+	public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
+	in
+	{
+		assert(signature.length == EVP_PKEY_size(keypair));
+	}
+	body
+	{
+		EVP_PKEY_CTX* pkeyctx = null;
+
+		pkeyctx = EVP_PKEY_CTX_new(keypair, null);
+		if (pkeyctx is null)
+			throw new CryptographicException("Unable to create the key signing context.");
+		scope(exit)
+		{
+			if (pkeyctx !is null)
+				EVP_PKEY_CTX_free(pkeyctx);
+		}
+
+		if (EVP_PKEY_verify_init(pkeyctx) <= 0)
+			throw new CryptographicException("Unable to initialize the signing digest.");
+
+		if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
+			throw new CryptographicException("Unable to set the signing digest.");
+
+		int ret = EVP_PKEY_verify(pkeyctx, data.ptr, cast(long)data.length, signature.ptr, cast(long)signature.length);
+
+		return ret != 1;
+	} // verify()
+
+} // class RSA
+
+
+// ----------------------------------------------------------
+// UNITTESTING BELOW
 // ----------------------------------------------------------
 
 unittest
 {
 	import std.stdio;
-	writeln("Testing seal and open functions");
+	writeln("Testing seal and open functions:");
 
 	auto keypair = new RSA();
+	scope(exit) delete keypair;
 
    	ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
 	
@@ -385,8 +478,6 @@ unittest
 
     assert(plaintext.length	== decMessage.length);
     assert(plaintext		== decMessage);
-
-	delete keypair;
 }
 
 // ----------------------------------------------------------
@@ -394,17 +485,19 @@ unittest
 unittest
 {
 	import std.stdio;
-	writeln("Testing getXxxKey functions and constructors");
+	writeln("Testing getXxxKey functions and constructors:");
 
 	auto keypairA = new RSA();
+	scope(exit) delete keypairA;
 
 	auto privateKeyA = keypairA.getPrivateKey(null);
 	auto publicKeyA  = keypairA.getPublicKey();
 	
-  	const ubyte[] plaintext	= cast(ubyte[])"This is a test";
+   	ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
 
 	// Creating key from public key only
 	auto keypairB = new RSA(publicKeyA);
+	scope(exit) delete keypairB;
 
 	auto privateKeyB = keypairB.getPrivateKey(null);
 	auto publicKeyB  = keypairB.getPublicKey();
@@ -414,16 +507,13 @@ unittest
 
 	//  Creating key from private key only
 	auto keypairC = new RSA(privateKeyA, null);
+	scope(exit) delete keypairC;
 
 	auto publicKeyC	 = keypairC.getPublicKey();
 	auto privateKeyC = keypairC.getPrivateKey(null);
 
 	assert(privateKeyA	== privateKeyC,	"Private keys A and C does not match");
 	assert(publicKeyA 	== publicKeyC,	"Public  keys A and C does not match");
-	
-	delete keypairA;
-	delete keypairB;
-	delete keypairC;
 }
 
 // ----------------------------------------------------------
@@ -431,50 +521,49 @@ unittest
 unittest
 {
 	import std.stdio;
-	writeln("Testing sealing and opening with keys, which have been constructed on getXxxKey output");
+	writeln("Testing sealing and opening with keys, which have been constructed on getXxxKey output:");
 
 	auto keypairA = new RSA();
+	scope(exit)		delete keypairA;
 
 	auto privateKeyA = keypairA.getPrivateKey(null);
 	auto publicKeyA  = keypairA.getPublicKey();
 	
-  	const ubyte[] plaintext	= cast(ubyte[])"This is a test";
+   	ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
 
 	// Creating key from public key only
 	auto keypairB		=  new RSA(publicKeyA);
+	scope(exit)			   delete keypairB;
+	
 	auto publicKeyB		=  keypairB.getPublicKey();
 	assert(publicKeyA 	== publicKeyB,	"Public  keys A and B does not match");
 
 	//  Creating key from private key only
 	auto keypairC		=  new RSA(privateKeyA, null);
+	scope(exit)			   delete keypairC;
+	
 	auto privateKeyC	=  keypairC.getPrivateKey(null);
 	assert(privateKeyA	== privateKeyC,	"Private keys A and C does not match");
 
 	// Sealing plaintext using public key
-	ubyte[] encMessageC = keypairB.seal(plaintext);
+	ubyte[] encMessage	= keypairB.seal(plaintext);
 	// Opening encrypted message using private key
-	ubyte[] decMessageC = keypairC.open(encMessageC);
+	ubyte[] decMessage	= keypairC.open(encMessage);
 	
-    assert(plaintext.length	== decMessageC.length);
-    assert(plaintext		== decMessageC);
-
-	delete keypairA;
-	delete keypairB;
-	delete keypairC;
+    assert(plaintext.length	== decMessage.length);
+    assert(plaintext		== decMessage);
 }
 
 // ----------------------------------------------------------
 
 unittest
 {
-	// Only RSA asymmetric encryption!
-
 	import std.stdio;
-	writeln("Testing encrypt/decrypt functions");
+	writeln("Testing RSA only encrypt/decrypt functions:");
 
 	auto keypair = new RSA();
+	scope(exit) delete keypair;
 
-   	//const ubyte[] plaintext = cast(ubyte[])"abc";
 	ubyte[48] plaintext = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
 							0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
 							0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
@@ -484,8 +573,53 @@ unittest
 
     assert(plaintext.length	== decMessage.length);
     assert(plaintext		== decMessage);
-
-	delete keypair;
 }
 
 // ----------------------------------------------------------
+
+unittest
+{
+	import std.stdio;
+	writeln("Testing RSA encrypt/decrypt limit:");
+
+	auto keypair = new RSA(2048);  // Only allows for (2048/8)-42 = 214 bytes to be asymmetrically RSA encrypted
+	scope(exit) delete keypair;
+
+	// This should work
+	ubyte[214] plaintext214 = 2; // 2 being an arbitrary value
+
+	ubyte[] encMessage214 = keypair.encrypt(plaintext214);
+	assert(encMessage214.length == 2048 / 8);
+	
+	ubyte[] decMessage214 = keypair.decrypt(encMessage214);
+
+    assert(plaintext214.length	== decMessage214.length);
+    assert(plaintext214			== decMessage214);
+	
+	// This should NOT work, as the plaintext is larger that allowed for this 2048 bit RSA keypair
+	ubyte[215] plaintext215 = 2; // 2 being an arbitrary value
+
+	import std.exception: assertThrown;
+	assertThrown!CryptographicException(keypair.encrypt(plaintext215));
+}
+
+// ----------------------------------------------------------
+
+unittest
+{
+	import std.stdio;
+	writeln("Testing RSA Signing/Verification:");
+
+	import std.digest.digest;
+
+	auto keypair = new RSA();
+	scope(exit) delete keypair;
+
+	ubyte[48] data = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+	ubyte[] sig = keypair.sign(data);
+	writeln("Signature: ", toHexString!(LetterCase.lower)(sig));
+	assert(keypair.verify(data, sig));
+}

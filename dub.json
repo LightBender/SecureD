@@ -1,12 +1,13 @@
 {
 	"name": "secured",
 	"authors": [
-		"Adam Wilson"
+		"Adam Wilson",
+		"Adam Williams"
 	],
 
 	"targetType": "library",
 	"description": "A cryptography library for D that encourages secure implementations through simple interfaces.",
-	"copyright": "Copyright © 2016, Adam Wilson",
+	"copyright": "Copyright © 2016-2017, Adam Wilson",
 	"license": "BSL-1.0",
 	"configurations": [
 		{
