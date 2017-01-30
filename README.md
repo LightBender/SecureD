@@ -31,6 +31,7 @@ All API's are unittested using D's built in unittests. Any developer can verify 
 - KDF:				PBKDF2 (HMAC/SHA2-384)
 - AEAD Symmetric: 	AES-256-CTR-HMAC384
 - Asymmetric:		ECC-P384 (Key Derivation + Sign/Verify with SHA2-384)
+- Asymmetric:		RSA-AES-256-CTR Seal/Open, RSA only Encrypt/Decrypt and RSA only Sign/Verify
 - RNG: 				System RNG on POSIX and Windows
 - OTHER: 			Constant Time Equality
 
