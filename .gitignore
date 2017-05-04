@@ -3,3 +3,5 @@
 .dub/
 *.selections.json
 __test*
+*.DS_Store
+secured-test-library

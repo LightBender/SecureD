@@ -18,7 +18,7 @@ import secured.hmac;
 import secured.random;
 import secured.util;
 
-@trusted public ubyte[] encrypt (ubyte[] key, ubyte[] data, ubyte[] additionalData)
+@trusted public ubyte[] encrypt (ubyte[] key, ubyte[] data)
 in
 {
 	assert(key.length == 32, "Encryption key must be 32 bytes in length.");
@@ -76,14 +76,14 @@ body
 	}
 
 	//HMAC the combined cipher text
-	ubyte[] hashdata = additionalData !is null ? iv ~ output ~ additionalData : iv ~ output;
+	ubyte[] hashdata = iv ~ output;
 	ubyte[] hash = hmac(key, hashdata);
 
 	//Return the HMAC + IV + Ciphertext as a single byte array.
 	return hash ~ iv ~ output;
 }
 
-@trusted public bool validate (ubyte[] key, ubyte[] data, ubyte[] additionalData)
+@trusted public bool validate (ubyte[] key, ubyte[] data)
 in
 {
 	assert(key.length == 32, "Encryption key must be 32 bytes in length.");
@@ -91,13 +91,12 @@ in
 body
 {
 	ubyte[] datahash = data[0..48];
-	ubyte[] dataad = additionalData !is null ? data[48..$] ~ additionalData : data[48..$];
-	ubyte[] computed = hmac(key, dataad);
+	ubyte[] computed = hmac(key, data[48..$]);
 
 	return constantTimeEquality(datahash, computed);
 }
 
-@trusted public ubyte[] decrypt (ubyte[] key, ubyte[] data, ubyte[] additionalData)
+@trusted public ubyte[] decrypt (ubyte[] key, ubyte[] data)
 in
 {
 	assert(key.length == 32, "Encryption key must be 32 bytes in length.");
@@ -105,7 +104,7 @@ in
 body
 {
 	//Validate the data
-	if (!validate(key, data, additionalData))
+	if (!validate(key, data))
 		throw new CryptographicException("Cannot get an OpenSSL cipher context.");
 
 	ubyte[] iv = data[48..64];
@@ -171,43 +170,15 @@ unittest
 
 	string input = "The quick brown fox jumps over the lazy dog.";
 	writeln("Encryption Input: ", input);
-	ubyte[] enc = encrypt(key, cast(ubyte[])input, null);
+	ubyte[] enc = encrypt(key, cast(ubyte[])input);
 	writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
 
 	write("Testing Validation (No Additional Data): ");
-	assert(validate(key, enc, null));
+	assert(validate(key, enc));
 	writeln("Success!");
 
 	writeln("Testing Decryption (No Additional Data)");
-	ubyte[] dec = decrypt(key, enc, null);
-	writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
-	writeln("Decryption Output: ", cast(string)dec);
-
-	assert((cast(string)dec) == input);
-}
-
-unittest
-{
-	import std.digest.digest;
-	import std.stdio;
-
-	writeln("Testing Encryption (With Additional Data)");
-
-	ubyte[32] key = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
-						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
-
-	string input = "The quick brown fox jumps over the lazy dog.";
-	string ad = "Hello world!";
-	writefln("Encryption Input: %s - Additional Data: %s", input, ad);
-	ubyte[] enc = encrypt(key, cast(ubyte[])input, cast(ubyte[])ad);
-	writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
-
-	write("Testing Validation (With Additional Data): ");
-	assert(validate(key, enc, cast(ubyte[])ad));
-	writeln("Success!");
-
-	writeln("Testing Decryption (With Additional Data)");
-	ubyte[] dec = decrypt(key, enc, cast(ubyte[])ad);
+	ubyte[] dec = decrypt(key, enc);
 	writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
 	writeln("Decryption Output: ", cast(string)dec);
 
