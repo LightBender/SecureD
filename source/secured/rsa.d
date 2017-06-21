@@ -397,32 +397,35 @@ public class RSA
 	}
 	body
 	{
-		EVP_PKEY_CTX* pkeyctx = null;
+		EVP_MD_CTX *mdctx = null;
 
-		pkeyctx = EVP_PKEY_CTX_new(keypair, null);
-		if (pkeyctx is null)
-			throw new CryptographicException("Unable to create the key signing context.");
+		mdctx = EVP_MD_CTX_create();
+		if (mdctx is null)
+			throw new CryptographicException("Unable to create the MD signing context.");
 		scope(exit)
 		{
-			if (pkeyctx !is null)
-				EVP_PKEY_CTX_free(pkeyctx);
+			if (mdctx !is null)
+				EVP_MD_CTX_destroy(mdctx);
 		}
 
-		if (EVP_PKEY_sign_init(pkeyctx) <= 0)
+		auto alg = (!useSha256 ? EVP_sha384() : EVP_sha256());
+
+		if (EVP_DigestSignInit(mdctx, null, alg, null, keypair) != 1)
 			throw new CryptographicException("Unable to initialize the signing digest.");
 
-		if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
-			throw new CryptographicException("Unable to set the signing digest.");
+		if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
+			throw new CryptographicException("Unable to set sign data.");
 
 		ulong signlen = 0;
-		if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0)
+		if (EVP_DigestSignFinal(mdctx, null, &signlen) != 1)
 			throw new CryptographicException("Unable to calculate signature length.");
 
 		ubyte[] sign = new ubyte[signlen];
-		if (EVP_PKEY_sign(pkeyctx, sign.ptr, &signlen, data.ptr, data.length) <= 0)
-			throw new CryptographicException("Unable to calculate signature.");
+		if (EVP_DigestSignFinal(mdctx, sign.ptr, &signlen) != 1)
+			throw new CryptographicException("Unable to finalize signature");
 
-		return sign;
+
+		return sign[0..signlen];
 	} // sign()
 
 // ----------------------------------------------------------
@@ -434,26 +437,28 @@ public class RSA
 	}
 	body
 	{
-		EVP_PKEY_CTX* pkeyctx = null;
+		EVP_MD_CTX *mdctx = null;
 
-		pkeyctx = EVP_PKEY_CTX_new(keypair, null);
-		if (pkeyctx is null)
-			throw new CryptographicException("Unable to create the key signing context.");
+		mdctx = EVP_MD_CTX_create();
+		if (mdctx is null)
+			throw new CryptographicException("Unable to create the MD signing context.");
 		scope(exit)
 		{
-			if (pkeyctx !is null)
-				EVP_PKEY_CTX_free(pkeyctx);
+			if (mdctx !is null)
+				EVP_MD_CTX_destroy(mdctx);
 		}
 
-		if (EVP_PKEY_verify_init(pkeyctx) <= 0)
-			throw new CryptographicException("Unable to initialize the signing digest.");
+		auto alg = (!useSha256 ? EVP_sha384() : EVP_sha256());
 
-		if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
-			throw new CryptographicException("Unable to set the signing digest.");
+		if (EVP_DigestVerifyInit(mdctx, null, alg, null, keypair) != 1)
+			throw new CryptographicException("Unable to initialize the verification digest.");
 
-		int ret = EVP_PKEY_verify(pkeyctx, data.ptr, cast(long)data.length, signature.ptr, cast(long)signature.length);
+		if (EVP_DigestVerifyUpdate(mdctx, data.ptr, data.length) != 1)
+			throw new CryptographicException("Unable to set verify data.");
 
-		return ret != 1;
+		int ret = EVP_DigestVerifyFinal(mdctx, signature.ptr, signature.length);
+
+		return ret == 1;
 	} // verify()
 
 } // class RSA
@@ -619,7 +624,12 @@ unittest
 						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
 						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
+	ubyte[48] data2 = [	0x1, 0x2, 0x3, 0x4, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
 	ubyte[] sig = keypair.sign(data);
 	writeln("Signature: ", toHexString!(LetterCase.lower)(sig));
 	assert(keypair.verify(data, sig));
+	assert(!keypair.verify(data2, sig));
 }
