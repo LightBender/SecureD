@@ -2,7 +2,8 @@
 	"name": "secured",
 	"authors": [
 		"Adam Wilson",
-		"Adam Williams"
+		"Adam Williams",
+		"Georgi Dimitrov"
 	],
 
 	"targetType": "library",
