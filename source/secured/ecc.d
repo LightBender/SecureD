@@ -189,7 +189,7 @@ public class EllipticCurve
 				throw new CryptographicException("Unable to set the peer key.");
 
 			//Derive the key
-			ulong dklen = 0;
+			size_t dklen = 0;
 			if (EVP_PKEY_derive(ctx, null, &dklen) <= 0)
 				throw new CryptographicException("Unable to determine the length of the derived key.");
 			ubyte[] derivedKey = new ubyte[dklen];
@@ -241,7 +241,7 @@ public class EllipticCurve
 			if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
 				throw new CryptographicException("Unable to set the signing digest.");
 
-			ulong signlen = 0;
+			size_t signlen = 0;
 			if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0)
 				throw new CryptographicException("Unable to calculate signature length.");
 
