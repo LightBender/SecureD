@@ -130,61 +130,64 @@ public class RSA
 		const ubyte* msg	= plaintext.ptr;
 		size_t msgLen 		= plaintext.length;
 		
-		assert(size_t.sizeof == 8);
-		
-		size_t maxHeaderL	= 2 + 2 + 4; // 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
-		size_t maxEKL		= EVP_PKEY_size(keypair);
-		size_t maxIVL		= EVP_MAX_IV_LENGTH;
-		size_t maxEncMsgLen	= msgLen + EVP_MAX_IV_LENGTH;
-		size_t maxTotalSize	= maxHeaderL + maxEKL + maxIVL + maxEncMsgLen; 
-
-		size_t encMsgLen = 0;
-		size_t blockLen  = 0;
-	   
-		*ivl = EVP_MAX_IV_LENGTH;
-
-		ubyte* buffer = cast(ubyte*)GC.malloc(maxTotalSize);
-		if(buffer == null)
-			throw new CryptographicException("Malloc failed.");
-		
-		*ek = buffer + maxHeaderL;
-		*iv = buffer + maxHeaderL + maxEKL;
-		*encMsg = buffer + maxHeaderL + maxEKL + maxIVL;
-
-		EVP_CIPHER_CTX *rsaEncryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
-		if(rsaEncryptCtx == null)
-			throw new CryptographicException("Malloc failed.");
-		scope(exit)
+		static if(size_t.sizeof == 8)
 		{
-			if (rsaEncryptCtx !is null)
-				EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
-		}
+			size_t maxHeaderL	= 2 + 2 + 4; // 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
+			size_t maxEKL		= EVP_PKEY_size(keypair);
+			size_t maxIVL		= EVP_MAX_IV_LENGTH;
+			size_t maxEncMsgLen	= msgLen + EVP_MAX_IV_LENGTH;
+			size_t maxTotalSize	= maxHeaderL + maxEKL + maxIVL + maxEncMsgLen; 
 
-		EVP_CIPHER_CTX_init(rsaEncryptCtx);
+			size_t encMsgLen = 0;
+			size_t blockLen  = 0;
+		   
+			*ivl = EVP_MAX_IV_LENGTH;
 
-		if(!EVP_SealInit(rsaEncryptCtx, EVP_aes_256_ctr(), ek, cast(int*)ekl, *iv, &keypair, 1))
-			throw new CryptographicException("CEVP_SealInit failed.");
-
-		if(!EVP_SealUpdate(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen, cast(const ubyte*)msg, cast(int)msgLen))
-			throw new CryptographicException("EVP_SealUpdate failed.");
-		encMsgLen += blockLen;
-
-		if(!EVP_SealFinal(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen))
-			throw new CryptographicException("EVP_SealFinal failed.");
-		encMsgLen += blockLen;
-
-		EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
-
-		buffer[0 .. 2] = (cast(ubyte*)ekl)[0..2];
-		buffer[2 .. 4] = (cast(ubyte*)ivl)[0..2];
-
-		ubyte* encMsgLenTemp = cast(ubyte*)(&encMsgLen);
-		buffer[4..8] = encMsgLenTemp[0..4];
+			ubyte* buffer = cast(ubyte*)GC.malloc(maxTotalSize);
+			if(buffer == null)
+				throw new CryptographicException("Malloc failed.");
 			
-		assert(*ekl == maxEKL);
-		assert(*ivl == maxIVL);
-		
-		return buffer[0 .. maxHeaderL + maxEKL + maxIVL + encMsgLen];
+			*ek = buffer + maxHeaderL;
+			*iv = buffer + maxHeaderL + maxEKL;
+			*encMsg = buffer + maxHeaderL + maxEKL + maxIVL;
+
+			EVP_CIPHER_CTX *rsaEncryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
+			if(rsaEncryptCtx == null)
+				throw new CryptographicException("Malloc failed.");
+			scope(exit)
+			{
+				if (rsaEncryptCtx !is null)
+					EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
+			}
+
+			EVP_CIPHER_CTX_init(rsaEncryptCtx);
+
+			if(!EVP_SealInit(rsaEncryptCtx, EVP_aes_256_ctr(), ek, cast(int*)ekl, *iv, &keypair, 1))
+				throw new CryptographicException("CEVP_SealInit failed.");
+
+			if(!EVP_SealUpdate(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen, cast(const ubyte*)msg, cast(int)msgLen))
+				throw new CryptographicException("EVP_SealUpdate failed.");
+			encMsgLen += blockLen;
+
+			if(!EVP_SealFinal(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen))
+				throw new CryptographicException("EVP_SealFinal failed.");
+			encMsgLen += blockLen;
+
+			EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
+
+			buffer[0 .. 2] = (cast(ubyte*)ekl)[0..2];
+			buffer[2 .. 4] = (cast(ubyte*)ivl)[0..2];
+
+			ubyte* encMsgLenTemp = cast(ubyte*)(&encMsgLen);
+			buffer[4..8] = encMsgLenTemp[0..4];
+				
+			assert(*ekl == maxEKL);
+			assert(*ivl == maxIVL);
+			
+			return buffer[0 .. maxHeaderL + maxEKL + maxIVL + encMsgLen];
+		}
+		else
+			assert(0);
 	} // seal()
 
 // ----------------------------------------------------------
@@ -192,60 +195,63 @@ public class RSA
 	ubyte[] open(ubyte[] encMessage)
 	{
 		assert(encMessage.length > 8); // Encrypted message must be larger than header = ekl + ivl + messageLength
-		assert(size_t.sizeof == 8);
-		
-		// Header: 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
-		size_t maxHeaderL	= 2 + 2 + 4;
-		size_t maxEKL		= EVP_PKEY_size(keypair);
-		size_t maxIVL		= EVP_MAX_IV_LENGTH;
-
-		ubyte* ek			= encMessage.ptr + maxHeaderL;
-		ubyte[8] temp		= 0;
-		temp[0..2]			= encMessage[0..2];
-		int ekl				= (cast(int[])temp)[0];
-			
-		ubyte* iv			= encMessage.ptr + maxHeaderL + maxEKL;
-		temp				= 0;
-		temp[0..2]			= encMessage[2..4];
-		size_t ivl			= (cast(int[])temp)[0];
-
-		ubyte* encMsg		= encMessage.ptr + maxHeaderL + maxEKL + maxIVL;
-		temp				= 0;
-		temp[0..4]			= encMessage[4..8];
-		size_t encMsgLen	= (cast(size_t[])temp)[0];
-		
-		size_t decLen   = 0;
-		size_t blockLen = 0;
-		EVP_PKEY *key;
-		ubyte* _decMsg;
-		auto decMsg = &_decMsg;
-		*decMsg = cast(ubyte*)GC.malloc(encMsgLen + ivl);
-		if(decMsg == null)
-			throw new CryptographicException("Malloc failed.");
-
-		EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
-		if(rsaDecryptCtx == null)
-			throw new CryptographicException("Malloc failed.");
-		scope(exit)
+		static if(size_t.sizeof == 8)
 		{
-			if (rsaDecryptCtx !is null)
-				EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);
+			// Header: 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
+			size_t maxHeaderL	= 2 + 2 + 4;
+			size_t maxEKL		= EVP_PKEY_size(keypair);
+			size_t maxIVL		= EVP_MAX_IV_LENGTH;
+
+			ubyte* ek			= encMessage.ptr + maxHeaderL;
+			ubyte[8] temp		= 0;
+			temp[0..2]			= encMessage[0..2];
+			int ekl				= (cast(int[])temp)[0];
+				
+			ubyte* iv			= encMessage.ptr + maxHeaderL + maxEKL;
+			temp				= 0;
+			temp[0..2]			= encMessage[2..4];
+			size_t ivl			= (cast(int[])temp)[0];
+
+			ubyte* encMsg		= encMessage.ptr + maxHeaderL + maxEKL + maxIVL;
+			temp				= 0;
+			temp[0..4]			= encMessage[4..8];
+			size_t encMsgLen	= (cast(size_t[])temp)[0];
+			
+			size_t decLen   = 0;
+			size_t blockLen = 0;
+			EVP_PKEY *key;
+			ubyte* _decMsg;
+			auto decMsg = &_decMsg;
+			*decMsg = cast(ubyte*)GC.malloc(encMsgLen + ivl);
+			if(decMsg == null)
+				throw new CryptographicException("Malloc failed.");
+
+			EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
+			if(rsaDecryptCtx == null)
+				throw new CryptographicException("Malloc failed.");
+			scope(exit)
+			{
+				if (rsaDecryptCtx !is null)
+					EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);
+			}
+
+			EVP_CIPHER_CTX_init(rsaDecryptCtx);
+
+			if(!EVP_OpenInit(rsaDecryptCtx, EVP_aes_256_ctr(), ek, ekl, iv, keypair))
+				throw new CryptographicException("EVP_OpenInit failed.");
+
+			if(!EVP_OpenUpdate(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen, encMsg, cast(int)encMsgLen))
+				throw new CryptographicException("EVP_OpenUpdate failed.");
+			decLen += blockLen;
+
+			if(!EVP_OpenFinal(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen))
+				throw new CryptographicException("EVP_OpenFinal failed.");
+			decLen += blockLen;
+
+			return (*decMsg)[0 .. decLen];
 		}
-
-		EVP_CIPHER_CTX_init(rsaDecryptCtx);
-
-		if(!EVP_OpenInit(rsaDecryptCtx, EVP_aes_256_ctr(), ek, ekl, iv, keypair))
-			throw new CryptographicException("EVP_OpenInit failed.");
-
-		if(!EVP_OpenUpdate(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen, encMsg, cast(int)encMsgLen))
-			throw new CryptographicException("EVP_OpenUpdate failed.");
-		decLen += blockLen;
-
-		if(!EVP_OpenFinal(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen))
-			throw new CryptographicException("EVP_OpenFinal failed.");
-		decLen += blockLen;
-
-		return (*decMsg)[0 .. decLen];
+		else
+			assert(0);
 	} // open()
 
 // ---------------------------------------------------------- // ----------------------------------------------------------
@@ -416,7 +422,7 @@ public class RSA
 		if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
 			throw new CryptographicException("Unable to set sign data.");
 
-		ulong signlen = 0;
+		size_t signlen = 0;
 		if (EVP_DigestSignFinal(mdctx, null, &signlen) != 1)
 			throw new CryptographicException("Unable to calculate signature length.");
 

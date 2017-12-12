@@ -48,7 +48,7 @@ body
 			throw new CryptographicException("Error while updating digest.");
 
 		//Copy the OpenSSL digest to our D buffer.
-		ulong digestlen;
+		size_t digestlen;
 		ubyte[] digest = new ubyte[48];
 		if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0)
 			throw new CryptographicException("Error while retrieving the digest.");
@@ -139,7 +139,7 @@ body
 		}
 
 		//Copy the OpenSSL digest to our D buffer.
-		ulong digestlen;
+		size_t digestlen;
 		ubyte[] digest = new ubyte[48];
 		if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0)
 			throw new CryptographicException("Error while retrieving the digest.");

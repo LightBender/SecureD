@@ -5,7 +5,7 @@
 		"Adam Williams",
 		"Georgi Dimitrov"
 	],
-
+	"targetPath": "bin/",
 	"targetType": "library",
 	"description": "A cryptography library for D that encourages secure implementations through simple interfaces.",
 	"copyright": "Copyright © 2016-2017, Adam Wilson",

@@ -28,9 +28,9 @@ version(OpenSSL)
 		}
 	}
 
-	extern(C) public static ulong thread_id_function()
+	extern(C) public static size_t thread_id_function()
 	{
-		return cast(ulong)Thread.getThis().id;
+		return Thread.getThis().id;
 	}
 }
 
