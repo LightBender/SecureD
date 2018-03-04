@@ -30,7 +30,7 @@ version(OpenSSL)
 
 	extern(C) public static size_t thread_id_function()
 	{
-		return Thread.getThis().id;
+		return cast(size_t)Thread.getThis().id;
 	}
 }
 

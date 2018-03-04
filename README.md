@@ -13,7 +13,7 @@ One of the largest problems with most cryptography libraries available today is 
 The primary intended use case for this library is for long-term data storage. It is not intended to be used as an SSL or streaming communications cryptography library.
 
 ### Safe by Design
-Use only safe algorithms with safe modes. Make conservative choices in the implementation
+Use only safe algorithms with safe modes. Make conservative choices in the implementation.
 
 ### Do no re-implement Cryptography Algorithms
 Use industry standard libraries instead. SecureD is based on OpenSSL.

@@ -8,21 +8,21 @@
 	"targetPath": "bin/",
 	"targetType": "library",
 	"description": "A cryptography library for D that encourages secure implementations through simple interfaces.",
-	"copyright": "Copyright © 2016-2017, Adam Wilson",
+	"copyright": "Copyright © 2016-2018, Adam Wilson",
 	"license": "BSL-1.0",
 	"configurations": [
 		{
 			"name": "library",
 			"versions": ["OpenSSL"],
 			"dependencies": {
-				"openssl": "~>1.1.5"
+				"openssl": "~>1.1.6"
 			}
 		},
 		{
 			"name": "botan",
 			"versions": ["Botan"],
 			"dependencies": {
-				"botan": "~>1.12.8"
+				"botan": "~>1.12.9"
 			}
 		}
 	]
