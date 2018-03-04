@@ -2,6 +2,24 @@ module secured.random;
 
 import secured.util;
 
+version(CRuntime_Bionic)
+	version = SecureARC4Random;//ChaCha20
+else version(OSX)
+	version = SecureARC4Random;//AES
+else version(OpenBSD)
+	version = SecureARC4Random;//ChaCha20
+else version(NetBSD)
+	version = SecureARC4Random;//ChaCha20
+// Can uncomment following two lines if Solaris versions prior to 11.3 are unsupported:
+//else version (Solaris)
+//	version = SecureARC4Random;
+
+version(SecureARC4Random)
+extern(C) @nogc nothrow private @system
+{
+	void arc4random_buf(scope void* buf, size_t nbytes);
+}
+
 @trusted public ubyte[] random(uint bytes)
 {
 	if (bytes == 0)
@@ -10,7 +28,11 @@ import secured.util;
 	}
 	ubyte[] buffer = new ubyte[bytes];
 
-	version(Posix)
+	version(SecureARC4Random)
+	{
+		arc4random_buf(buffer.ptr, bytes);
+	}
+	else version(Posix)
 	{
 		import std.exception;
 		import std.format;
