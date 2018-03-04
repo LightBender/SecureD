@@ -23,6 +23,12 @@ __dummy.html
 # MonoDevelop
 *.userprefs
 
+# IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
 # =========================
 # Operating System Files
 # =========================
