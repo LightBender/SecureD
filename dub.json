@@ -3,7 +3,8 @@
 	"authors": [
 		"Adam Wilson",
 		"Adam Williams",
-		"Georgi Dimitrov"
+		"Georgi Dimitrov",
+                "Nathan Sashihara"
 	],
 	"targetPath": "bin/",
 	"targetType": "library",
