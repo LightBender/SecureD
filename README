@@ -38,3 +38,5 @@ Why these Algorithms?
 SHA2-384 is as fast as SHA2-512 but it's truncated design serves as an effective defense against length extensions attacks.
 
 AES-256-CTR is an alternative for GCM that offers greater security for cold-stored data when paired with a strong HMAC. GCM use a 96-bit authentication tag where the HMAC tag is a full 384 bits.
+
+NOTE: SecureD is built against OpenSSL 1.1.0 or greater. If you need to use OpenSSL 1.0.x add version 'OpenSSL10' to your command line.
