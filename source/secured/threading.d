@@ -1,6 +1,6 @@
 module secured.threading;
 
-version(OpenSSL)
+version(OpenSSL10)
 {
 	import deimos.openssl.crypto;
 	import deimos.openssl.evp;

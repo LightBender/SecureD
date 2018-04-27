@@ -4,6 +4,7 @@ import std.stdio;
 
 version(OpenSSL)
 {
+import secured.openssl;
 import deimos.openssl.evp;
 }
 version(Botan)
@@ -19,11 +20,11 @@ import secured.util;
 	{
 		//Create the OpenSSL context
 		EVP_MD_CTX *mdctx;
-		if ((mdctx = EVP_MD_CTX_create()) == null)
+		if ((mdctx = EVP_MD_CTX_new()) == null)
 			throw new CryptographicException("Unable to create OpenSSL context.");
 		scope(exit)
 			if(mdctx !is null)
-				EVP_MD_CTX_destroy(mdctx);
+				EVP_MD_CTX_free(mdctx);
 
 		//Initialize the SHA-384 algorithm
 		if (EVP_DigestInit_ex(mdctx, EVP_sha384(), null) < 0)
@@ -91,11 +92,11 @@ unittest {
 	{
 		//Create the OpenSSL context
 		EVP_MD_CTX *mdctx;
-		if ((mdctx = EVP_MD_CTX_create()) == null)
+		if ((mdctx = EVP_MD_CTX_new()) == null)
 			throw new CryptographicException("Unable to create OpenSSL context.");
 		scope(exit)
 			if(mdctx !is null)
-				EVP_MD_CTX_destroy(mdctx);
+				EVP_MD_CTX_free(mdctx);
 
 		//Initialize the SHA-384 algorithm
 		if (EVP_DigestInit_ex(mdctx, EVP_sha384(), null) < 0)

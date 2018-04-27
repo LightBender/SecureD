@@ -4,6 +4,7 @@ import core.memory;
 
 version(OpenSSL)
 {
+import secured.openssl;
 import deimos.openssl.evp;
 import deimos.openssl.rand;
 import deimos.openssl.pem;
@@ -150,17 +151,24 @@ public class RSA
 			*ek = buffer + maxHeaderL;
 			*iv = buffer + maxHeaderL + maxEKL;
 			*encMsg = buffer + maxHeaderL + maxEKL + maxIVL;
-
+version(OpenSSL10) {
 			EVP_CIPHER_CTX *rsaEncryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
 			if(rsaEncryptCtx == null)
 				throw new CryptographicException("Malloc failed.");
+			EVP_CIPHER_CTX_init(rsaEncryptCtx);
+} else {
+			EVP_CIPHER_CTX *rsaEncryptCtx = EVP_CIPHER_CTX_new();	
+}
 			scope(exit)
 			{
-				if (rsaEncryptCtx !is null)
-					EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
+				if (rsaEncryptCtx !is null) {
+version(OpenSSL10) {
+					EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);	
+} else {
+					EVP_CIPHER_CTX_free(rsaEncryptCtx);
+}
+				}
 			}
-
-			EVP_CIPHER_CTX_init(rsaEncryptCtx);
 
 			if(!EVP_SealInit(rsaEncryptCtx, EVP_aes_256_ctr(), ek, cast(int*)ekl, *iv, &keypair, 1))
 				throw new CryptographicException("CEVP_SealInit failed.");
@@ -172,8 +180,6 @@ public class RSA
 			if(!EVP_SealFinal(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen))
 				throw new CryptographicException("EVP_SealFinal failed.");
 			encMsgLen += blockLen;
-
-			EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
 
 			buffer[0 .. 2] = (cast(ubyte*)ekl)[0..2];
 			buffer[2 .. 4] = (cast(ubyte*)ivl)[0..2];
@@ -226,16 +232,24 @@ public class RSA
 			if(decMsg == null)
 				throw new CryptographicException("Malloc failed.");
 
+version(OpenSSL10) {
 			EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);	
 			if(rsaDecryptCtx == null)
 				throw new CryptographicException("Malloc failed.");
+			EVP_CIPHER_CTX_init(rsaDecryptCtx);
+} else {
+			EVP_CIPHER_CTX *rsaDecryptCtx = EVP_CIPHER_CTX_new();	
+}
 			scope(exit)
 			{
-				if (rsaDecryptCtx !is null)
-					EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);
+				if (rsaDecryptCtx !is null) {
+version(OpenSSL10) {
+					EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);	
+} else {
+					EVP_CIPHER_CTX_free(rsaDecryptCtx);
+}
+				}
 			}
-
-			EVP_CIPHER_CTX_init(rsaDecryptCtx);
 
 			if(!EVP_OpenInit(rsaDecryptCtx, EVP_aes_256_ctr(), ek, ekl, iv, keypair))
 				throw new CryptographicException("EVP_OpenInit failed.");
@@ -405,13 +419,13 @@ public class RSA
 	{
 		EVP_MD_CTX *mdctx = null;
 
-		mdctx = EVP_MD_CTX_create();
+		mdctx = EVP_MD_CTX_new();
 		if (mdctx is null)
 			throw new CryptographicException("Unable to create the MD signing context.");
 		scope(exit)
 		{
 			if (mdctx !is null)
-				EVP_MD_CTX_destroy(mdctx);
+				EVP_MD_CTX_free(mdctx);
 		}
 
 		auto alg = (!useSha256 ? EVP_sha384() : EVP_sha256());
@@ -445,13 +459,13 @@ public class RSA
 	{
 		EVP_MD_CTX *mdctx = null;
 
-		mdctx = EVP_MD_CTX_create();
+		mdctx = EVP_MD_CTX_new();
 		if (mdctx is null)
 			throw new CryptographicException("Unable to create the MD signing context.");
 		scope(exit)
 		{
 			if (mdctx !is null)
-				EVP_MD_CTX_destroy(mdctx);
+				EVP_MD_CTX_free(mdctx);
 		}
 
 		auto alg = (!useSha256 ? EVP_sha384() : EVP_sha256());
@@ -480,7 +494,7 @@ unittest
 	writeln("Testing seal and open functions:");
 
 	auto keypair = new RSA();
-	scope(exit) delete keypair;
+	scope(exit) keypair.destroy();
 
    	ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
 	
@@ -499,7 +513,7 @@ unittest
 	writeln("Testing getXxxKey functions and constructors:");
 
 	auto keypairA = new RSA();
-	scope(exit) delete keypairA;
+	scope(exit) keypairA.destroy();
 
 	auto privateKeyA = keypairA.getPrivateKey(null);
 	auto publicKeyA  = keypairA.getPublicKey();
@@ -508,7 +522,7 @@ unittest
 
 	// Creating key from public key only
 	auto keypairB = new RSA(publicKeyA);
-	scope(exit) delete keypairB;
+	scope(exit) keypairB.destroy();
 
 	auto privateKeyB = keypairB.getPrivateKey(null);
 	auto publicKeyB  = keypairB.getPublicKey();
@@ -518,7 +532,7 @@ unittest
 
 	//  Creating key from private key only
 	auto keypairC = new RSA(privateKeyA, null);
-	scope(exit) delete keypairC;
+	scope(exit) keypairC.destroy();
 
 	auto publicKeyC	 = keypairC.getPublicKey();
 	auto privateKeyC = keypairC.getPrivateKey(null);
@@ -535,7 +549,7 @@ unittest
 	writeln("Testing sealing and opening with keys, which have been constructed on getXxxKey output:");
 
 	auto keypairA = new RSA();
-	scope(exit)		delete keypairA;
+	scope(exit)		keypairA.destroy();
 
 	auto privateKeyA = keypairA.getPrivateKey(null);
 	auto publicKeyA  = keypairA.getPublicKey();
@@ -544,14 +558,14 @@ unittest
 
 	// Creating key from public key only
 	auto keypairB		=  new RSA(publicKeyA);
-	scope(exit)			   delete keypairB;
+	scope(exit)			   keypairB.destroy();
 	
 	auto publicKeyB		=  keypairB.getPublicKey();
 	assert(publicKeyA 	== publicKeyB,	"Public  keys A and B does not match");
 
 	//  Creating key from private key only
 	auto keypairC		=  new RSA(privateKeyA, null);
-	scope(exit)			   delete keypairC;
+	scope(exit)			   keypairC.destroy();
 	
 	auto privateKeyC	=  keypairC.getPrivateKey(null);
 	assert(privateKeyA	== privateKeyC,	"Private keys A and C does not match");
@@ -573,7 +587,7 @@ unittest
 	writeln("Testing RSA only encrypt/decrypt functions:");
 
 	auto keypair = new RSA();
-	scope(exit) delete keypair;
+	scope(exit) keypair.destroy();
 
 	ubyte[48] plaintext = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
 							0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
@@ -594,7 +608,7 @@ unittest
 	writeln("Testing RSA encrypt/decrypt limit:");
 
 	auto keypair = new RSA(2048);  // Only allows for (2048/8)-42 = 214 bytes to be asymmetrically RSA encrypted
-	scope(exit) delete keypair;
+	scope(exit) keypair.destroy();
 
 	// This should work
 	ubyte[214] plaintext214 = 2; // 2 being an arbitrary value
@@ -624,7 +638,7 @@ unittest
 	import std.digest.digest;
 
 	auto keypair = new RSA();
-	scope(exit) delete keypair;
+	scope(exit) keypair.destroy();
 
 	ubyte[48] data = [	0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
 						0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
