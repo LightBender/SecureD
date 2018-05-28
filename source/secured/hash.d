@@ -29,7 +29,16 @@ public enum HashFunction : ubyte {
     SHA3_512,
 }
 
-@trusted public ubyte[] hash(ubyte[] data, HashFunction func)
+@safe public ubyte[] hash(ubyte[] data) {
+    return hash_ex(data, HashFunction.SHA2_384);
+}
+
+@safe public bool hash_verify(ubyte[] test, ubyte[] data) {
+    ubyte[] hash = hash_ex(data, HashFunction.SHA2_384);
+    return constantTimeEquality(hash, test);
+}
+
+@trusted public ubyte[] hash_ex(ubyte[] data, HashFunction func)
 {
     version(OpenSSL)
     {
@@ -44,9 +53,9 @@ public enum HashFunction : ubyte {
             }
         }
 
-        //Initialize the SHA2 algorithm
+        //Initialize the hash algorithm
         if (EVP_DigestInit_ex(mdctx, getOpenSSLHashFunction(func), null) < 0) {
-            throw new CryptographicException("Unable to create SHA2 hash context.");
+            throw new CryptographicException("Unable to create hash context.");
         }
 
         //Run the provided data through the digest algorithm
@@ -83,15 +92,20 @@ public enum HashFunction : ubyte {
     }
 }
 
+@safe public bool hash_verify_ex(ubyte[] test, ubyte[] data, HashFunction func) {
+    ubyte[] hash = hash_ex(data, func);
+    return constantTimeEquality(hash, test);
+}
+
 unittest {
     import std.digest;
 
     writeln("Testing Byte Array Hash:");
 
-    ubyte[] vec1 = hash(cast(ubyte[])"", HashFunction.SHA2_384);
-    ubyte[] vec2 = hash(cast(ubyte[])"abc", HashFunction.SHA2_384);
-    ubyte[] vec3 = hash(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashFunction.SHA2_384);
-    ubyte[] vec4 = hash(cast(ubyte[])"The quick brown fox jumps over the lazy dog.", HashFunction.SHA2_384);
+    ubyte[] vec1 = hash_ex(cast(ubyte[])"", HashFunction.SHA2_384);
+    ubyte[] vec2 = hash_ex(cast(ubyte[])"abc", HashFunction.SHA2_384);
+    ubyte[] vec3 = hash_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashFunction.SHA2_384);
+    ubyte[] vec4 = hash_ex(cast(ubyte[])"The quick brown fox jumps over the lazy dog.", HashFunction.SHA2_384);
 
     writeln(toHexString!(LetterCase.lower)(vec1));
     writeln(toHexString!(LetterCase.lower)(vec2));
@@ -104,7 +118,17 @@ unittest {
     assert(toHexString!(LetterCase.lower)(vec4) == "ed892481d8272ca6df370bf706e4d7bc1b5739fa2177aae6c50e946678718fc67a7af2819a021c2fc34e91bdb63409d7");
 }
 
-@trusted public ubyte[] hash(string path, HashFunction func = HashFunction.SHA2_384)
+
+@safe public ubyte[] hash(string path) {
+    return hash_ex(path, HashFunction.SHA2_384);
+}
+
+@safe public bool hash_verify(string path, ubyte[] test) {
+    ubyte[] hash = hash_ex(path, HashFunction.SHA2_384);
+    return constantTimeEquality(hash, test);
+}
+
+@trusted public ubyte[] hash_ex(string path, HashFunction func)
 {
     //Open the file for reading
     auto fsfile = File(path, "rb");
@@ -127,9 +151,9 @@ unittest {
             }
         }
 
-        //Initialize the SHA-384 algorithm
+        //Initialize the hash algorithm
         if (EVP_DigestInit_ex(mdctx, getOpenSSLHashFunction(func), null) < 0) {
-            throw new CryptographicException("Unable to create SHA-384 hash context.");
+            throw new CryptographicException("Unable to create hash context.");
         }
 
         //Read the file in chunks and update the Digest
@@ -171,6 +195,11 @@ unittest {
     }
 }
 
+@safe public bool hash_verify_ex(string path, HashFunction func, ubyte[] test) {
+    ubyte[] hash = hash_ex(path, func);
+    return constantTimeEquality(hash, test);
+}
+
 unittest {
     import std.digest;
 
@@ -180,7 +209,7 @@ unittest {
     f.rawWrite("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq");
     f.close();
 
-    ubyte[] vec = hash("hashtest.txt", HashFunction.SHA2_384);
+    ubyte[] vec = hash_ex("hashtest.txt", HashFunction.SHA2_384);
     writeln(toHexString!(LetterCase.lower)(vec));
     assert(toHexString!(LetterCase.lower)(vec) == "3391fdddfc8dc7393707a65b1b4709397cf8b1d162af05abfe8f450de5f36bc6b0455a8520bc4e6f5fe95b1fe3c8452b");
 
@@ -188,7 +217,7 @@ unittest {
 }
 
 version(OpenSSL) {
-package const(EVP_MD)* getOpenSSLHashFunction(HashFunction func) {
+@trusted package const(EVP_MD)* getOpenSSLHashFunction(HashFunction func) {
     import std.conv;
     import std.format;
 
@@ -201,30 +230,10 @@ package const(EVP_MD)* getOpenSSLHashFunction(HashFunction func) {
             throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
     }
 }
-
-package int getHashLength(HashFunction func) {
-    import std.conv;
-    import std.format;
-
-    switch (func) {
-        case HashFunction.SHA2_224: return 24;
-        case HashFunction.SHA2_256: return 32;
-        case HashFunction.SHA2_384: return 48;
-        case HashFunction.SHA2_512: return 64;
-        case HashFunction.SHA2_512_224: return 24;
-        case HashFunction.SHA2_512_256: return 32;
-        case HashFunction.SHA3_224: return 24;
-        case HashFunction.SHA3_256: return 32;
-        case HashFunction.SHA3_384: return 48;
-        case HashFunction.SHA3_512: return 64;
-        default:
-            throw new CryptographicException(format("Hash Function '%s'", to!string(func)));
-    }
-}
 }
 
 version(Botan) {
-package auto getBotanHashFunction(HashFunction func) {
+@safe package auto getBotanHashFunction(HashFunction func) {
     import std.conv;
     import std.format;
 
@@ -243,4 +252,22 @@ package auto getBotanHashFunction(HashFunction func) {
 }
 }
 
+@safe package int getHashLength(HashFunction func) {
+    import std.conv;
+    import std.format;
 
+    switch (func) {
+        case HashFunction.SHA2_224: return 24;
+        case HashFunction.SHA2_256: return 32;
+        case HashFunction.SHA2_384: return 48;
+        case HashFunction.SHA2_512: return 64;
+        case HashFunction.SHA2_512_224: return 24;
+        case HashFunction.SHA2_512_256: return 32;
+        case HashFunction.SHA3_224: return 24;
+        case HashFunction.SHA3_256: return 32;
+        case HashFunction.SHA3_384: return 48;
+        case HashFunction.SHA3_512: return 64;
+        default:
+            throw new CryptographicException(format("Hash Function '%s'", to!string(func)));
+    }
+}

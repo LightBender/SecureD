@@ -47,11 +47,11 @@ private struct cryptoHeader {
     public ubyte hashAlg;       // The hash algorithm used
     public uint kdfIters;       // The number of PBKDF2 iterations
 
-    public ubyte authLen;       // The length of the authentication value
-    public ubyte saltLen;       // The length of the PBKDF2 Salt
+    public ubyte saltLen;       // The length of the KDK/MAC/KEY Salts
     public ubyte ivLen;         // The length of the IV
     public ulong encLen;        // The length of the encrypted data
     public ulong adLen;         // The length of the additional data
+    public ubyte authLen;       // The length of the authentication value
 }
 
 @trusted public ubyte[] encrypt (ubyte[] key, ubyte[] data)
