@@ -27,15 +27,15 @@ public struct KdfResult {
     public ubyte[] key;
 }
 
-@safe public KdfResult pbkdf2(string password) {
+@safe public KdfResult pbkdf2(string password, uint iterations = 1_000_000) {
     KdfResult result;
     result.salt = random(getHashLength(HashFunction.SHA2_384));
-    result.key = pbkdf2_ex(password, result.salt, HashFunction.SHA2_384, getHashLength(HashFunction.SHA2_384), 250_000);
+    result.key = pbkdf2_ex(password, result.salt, HashFunction.SHA2_384, getHashLength(HashFunction.SHA2_384), iterations);
     return result;
 }
 
-@safe public bool pbkdf2_verify(KdfResult test, string password) {
-    ubyte[] key = pbkdf2_ex(password, test.salt, HashFunction.SHA2_384, getHashLength(HashFunction.SHA2_384), 250_000);
+@safe public bool pbkdf2_verify(KdfResult test, string password, uint iterations = 1_000_000) {
+    ubyte[] key = pbkdf2_ex(password, test.salt, HashFunction.SHA2_384, getHashLength(HashFunction.SHA2_384), iterations);
     return constantTimeEquality(test.key, key);
 }
 
@@ -79,13 +79,19 @@ public struct KdfResult {
 
 unittest
 {
+    import std.datetime.stopwatch;
     import std.digest;
     import std.stdio;
 
-    writeln("Testing PBKDF2 Verify Methods:");
+    writeln("Testing PBKDF2 Basic Methods:");
 
     //Test basic methods
+    auto sw = StopWatch(AutoStart.no);
+    sw.start();
     auto result = pbkdf2("password");
+    sw.stop();
+    writefln("PBKDF2 took %sms for 1,000,000 iterations", sw.peek.total!"msecs");
+
     assert(result.key.length == 48);
     assert(pbkdf2_verify(result, "password"));
     writeln(toHexString!(LetterCase.lower)(result.key));
@@ -224,10 +230,6 @@ unittest
 
     version(Botan)
     {
-        if (info.length == 0) {
-            throw new CryptographicException("HKDF info cannot be an empty array.");
-        }
-
         auto hkdf = HKDF(new HMAC(getBotanHashFunction(func)), new HMAC(getBotanHashFunction(func)));
         
         hkdf.startExtract(salt.ptr, salt.length);

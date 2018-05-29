@@ -4,15 +4,19 @@ SecureD is a cryptography library for D that is designed to make working with cr
 
 Design Philosophy
 
+- SecureD does not present a menu of options by design. This is because the dizzying array of options presented to developers by other cryptography libraries creates confusion about what they should actually be using 95% of the time. SecureD presents only the choices that should be used in 95% of implementations.
+- SecureD reserves the right to change which algorithms and defaults it presents should significant weaknesses be found. If such change is required, this will trigger an increase of the major version number.
+- SecureD takes a situational approach to it's construction. Identify a situation then apply best practices to implement with a solution. Situations that SecureD supports are:
+  - Data Hashes
+  - Data Storage
+  - Message Authentication
+  - Key Derivation (Both PKI and KDF based)
+
 Developer-Friendly Misuse-Resistant API:
 One of the largest problems with most cryptography libraries available today is that their convoluted API's actively encourage broken implementations. SecureD aims to provide a simple API that exposes a reasonable amount of choice.
 
-Focus on Non-SSL Usages
-SecureD is designed to support a wide-variety of uses. Examples include:
-- Hashing
-- Signing/Verification
-- Long-Term Data Storage
-However, SecureD is explicitly NOT intended to be used as a transport security API. Implementing transport security protocols is a complex task that involves multiple layers of defenses. If you need such services please use SSL/TLS instead.
+Focus on Non Transport-Layer Usages:
+SecureD is designed to support a wide-variety of uses. However, SecureD is explicitly NOT intended to be used as a transport-layer security API. Implementing transport security protocols is a complex task that involves multiple layers of defenses. If you need such services please use TLS instead.
 
 Safe by Design:
 Use only safe algorithms with safe modes. Make conservative choices in the implementation.
@@ -33,18 +37,17 @@ Algorithms
   - SHA3: 224, 256, 384, 512
 - Symmetric:
   - Algorithms: AES (128/192/256)
-  - Modes: CTR, CBC (PCKS7 Padding)
-- KDF:              PBKDF2
-- Asymmetric:       ECC-P384 (Key Derivation + Sign/Verify with SHA2-384)
+  - Modes: CTR, CBC (PKCS7 Padding)
+- KDF:              PBKDF2, HKDF
+- Asymmetric:       ECC: Curve25519 (Default) P256, P384, P521 (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
 - Asymmetric:       RSA-AES-256-CTR Seal/Open, RSA only Encrypt/Decrypt and RSA only Sign/Verify
 - RNG:              System RNG on POSIX and Windows
 - Other:            Constant Time Equality
 
 Why these Algorithms?
 AES-CTR is an alternative for GCM that offers greater security for long-term data storage when paired with a strong HMAC. GCM use a 96-bit authentication tag where the HMAC tag is at least 256 bits.
-AES-CBC is included for compatibility and should not be used for new projects.
-
+AES-CBC is included for compatibility with existin systems and should not be used for new projects.
 Versioning
 SecureD follows SemVer. This means that the API surface and cryptographic implementations may be different between major versions. Minor and Point versions are cryptographically compatible. Minor versions may add new cryptographic algorithms to existing capabilities. Newer versions will provide an upgrade path from older versions where feasible.
 
-SecureD is built against OpenSSL 1.1.0 or greater. If you need to use OpenSSL 1.0.x add 'version=OpenSSL10' to your command line.
+SecureD is built against OpenSSL 1.1.1 or greater.

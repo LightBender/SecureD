@@ -1,9 +1,9 @@
 module secured;
 
-public import secured.aes;
 public import secured.ecc;
 public import secured.hash;
-public import secured.hmac;
 public import secured.kdf;
+public import secured.mac;
 public import secured.random;
+public import secured.symmetric;
 public import secured.util;

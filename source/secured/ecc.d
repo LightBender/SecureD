@@ -26,6 +26,13 @@ import secured.kdf;
 import secured.random;
 import secured.util;
 
+public enum EccCurve
+{
+    P256,
+    P384,
+    P521,
+}
+
 @trusted:
 
 public class EllipticCurve
@@ -46,7 +53,7 @@ public class EllipticCurve
     private bool _hasPrivateKey;
     public @property bool hasPrivateKey() { return _hasPrivateKey; }
 
-    public this()
+    public this(EccCurve curve = EccCurve.P384)
     {
         version(OpenSSL)
         {
@@ -60,8 +67,8 @@ public class EllipticCurve
                 throw new CryptographicException("Cannot get an OpenSSL public key context.");
             if (EVP_PKEY_paramgen_init(paramsctx) < 1)
                 throw new CryptographicException("Cannot initialize the OpenSSL public key context.");
-            if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, NID_secp384r1) < 1)
-                throw new CryptographicException("Cannot set the required curve: P-384.");
+            if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, getOpenSSLCurveId(curve)) < 1)
+                throw new CryptographicException("Cannot set the requested curve.");
             if (EVP_PKEY_paramgen(paramsctx, &params) < 1)
                 throw new CryptographicException("Unable to generate the key parameters.");
 
@@ -78,7 +85,7 @@ public class EllipticCurve
         version(Botan)
         {
             auto rng = new AutoSeededRNG();
-            auto ecg = ECGroup("secp384r1");
+            auto ecg = ECGroup(getBotanCurveId(curve));
             auto key = ECDHPrivateKey(rng, ecg);
             privKey = key.m_priv;
             pubKey = cast(ECPublicKey)key.m_priv;
@@ -255,7 +262,7 @@ public class EllipticCurve
         version(Botan)
         {
             auto rng = new AutoSeededRNG();
-            auto signer = new PKSigner(privKey, "EMSA1(SHA-256)");
+            auto signer = new PKSigner(privKey, !useSha256 ? "EMSA1(SHA-384)" : "EMSA1(SHA-256)");
             auto sig = signer.signMessage(data.ptr, data.length, rng);
 
             ubyte[] output = new ubyte[sig.length];
@@ -294,7 +301,7 @@ public class EllipticCurve
         version(Botan)
         {
             auto rng = new AutoSeededRNG();
-            auto verifier = new PKVerifier(pubKey, "EMSA1(SHA-256)");
+            auto verifier = new PKVerifier(pubKey, !useSha256 ? "EMSA1(SHA-384)" : "EMSA1(SHA-256)");
             return verifier.verifyMessage(data.ptr, data.length, signature.ptr, signature.length);
         }
     }
@@ -328,7 +335,7 @@ public class EllipticCurve
         }
     }
 
-    public string getPrivateKey(string password, int iterations = 25000, bool use3Des = false)
+    public string getPrivateKey(string password, bool use3Des = false)
     {
         if (!_hasPrivateKey)
             return null;
@@ -463,4 +470,34 @@ unittest
     ubyte[] sig = eckey.sign(data);
     writeln("Signature: ", toHexString!(LetterCase.lower)(sig));
     assert(eckey.verify(data, sig));
+}
+
+version(OpenSSL) {
+private int getOpenSSLCurveId(EccCurve curve) {
+    import std.conv;
+    import std.format;
+
+    switch (curve) {
+        case EccCurve.P256: return NID_secp256k1;
+        case EccCurve.P384: return NID_secp384r1;
+        case EccCurve.P521: return NID_secp521r1;
+        default:
+            throw new CryptographicException(format("ECC Curve '%s' not supported.", to!string(curve)));
+    }
+}
+}
+
+version(Botan) {
+private string getBotanCurveId(EccCurve curve) {
+    import std.conv;
+    import std.format;
+
+    switch (curve) {
+        case EccCurve.P256: return "secp256k1";
+        case EccCurve.P384: return "secp384r1";
+        case EccCurve.P521: return "secp521r1";
+        default:
+            throw new CryptographicException(format("ECC Curve '%s' not supported.", to!string(curve)));
+    }
+}
 }

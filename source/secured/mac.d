@@ -1,4 +1,4 @@
-module secured.hmac;
+module secured.mac;
 
 import std.stdio;
 import std.format;
