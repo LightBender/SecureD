@@ -1,6 +1,5 @@
 module secured.symmetric;
 
-
 import secured.mac;
 import secured.random;
 import secured.util;
@@ -19,26 +18,49 @@ public enum MacFunction : ubyte {
     HMAC_SHA3_512,
 }
 
-public enum EncryptionAlgorithm : ubyte {
-    AES128_CTR,
-    AES192_CTR,
-    AES256_CTR,
-    AES128_CBC,
-    AES192_CBC,
-    AES256_CBC,
+// Anatomy of an Algorithm ID
+// AES256_CTR_PBKDF2_HKDF_HMAC_SHA2_384
+// ------ --- ------ ---- ---- --------
+//    1    2     3     4    5      6
+// 1. Cipher + Strength
+// 2. Cipher Mode
+// 3. Key Deriviation Key Generator
+// 4. Key Material Extractor
+// 5. (Optional) Message Authentication Code (if Cipher does not provide one)
+// 6. Hash Algorithm used by 4, 5, and 6 (used as salt size if no salt provided)
+
+public enum SafeAlgorithms : ushort {
+    Default = AES256_GCM_PBKDF2_HKDF_SHA2_384,
+    AES256_GCM_PBKDF2_HKDF_SHA2_384 = 0,
+    AES256_CCM_PBKDF2_HKDF_SHA2_384 = 1,
+    AES256_CTR_PBKDF2_HKDF_HMAC_SHA2_384 = 2,
+}
+
+public enum EncryptionAlgorithms : ushort {
+    Default = AES256_GCM_PBKDF2_HKDF_SHA2_384,
+    AES256_GCM_PBKDF2_HKDF_SHA2_384 = 0,
+    AES256_CCM_PBKDF2_HKDF_SHA2_384 = 1,
+    AES256_CTR_PBKDF2_HKDF_HMAC_SHA2_384 = 2,
+    AES128_GCM_NONE,
+    AES128_CCM_NONE,
+    AES128_CTR_NONE,
+    AES128_CBC_NONE,
+    AES192_GCM_NONE,
+    AES192_CCM_NONE,
+    AES192_CTR_NONE,
+    AES192_CBC_NONE,
+    AES256_GCM_NONE,
+    AES256_CCM_NONE,
+    AES256_CTR_NONE,
+    AES256_CBC_NONE,
 }
 
 private struct cryptoHeader {
     public ubyte hdrVersion;    // The version of the header
-    public ubyte encAlg;        // The encryption algorithm used
-    public ubyte hashAlg;       // The hash algorithm used
+    public ushort algo;         // The hash algorithm used
     public uint kdfIters;       // The number of PBKDF2 iterations
 
-    public ubyte saltLen;       // The length of the KDK/MAC/KEY Salts
-    public ubyte ivLen;         // The length of the IV
-    public ulong encLen;        // The length of the encrypted data
-    public ulong adLen;         // The length of the additional data
-    public ubyte authLen;       // The length of the authentication value
+    public ubyte saltLen;       // The length of the KDK Salt
+    public uint encLen;         // The length of the encrypted data
+    public uint adLen;          // The length of the additional data
 }
-
-
