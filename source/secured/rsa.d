@@ -31,29 +31,28 @@ public class RSA
         RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
 
         EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, null);
-        if (ctx is null)
+        if (ctx is null) {
             throw new CryptographicException("EVP_PKEY_CTX_new_id failed.");
-        scope(exit)
-        {
+        }
+        scope(exit) {
             if (ctx !is null)
                 EVP_PKEY_CTX_free(ctx);
         }
 
-        if(EVP_PKEY_keygen_init(ctx) <= 0)
+        if(EVP_PKEY_keygen_init(ctx) <= 0) {
             throw new CryptographicException("EVP_PKEY_keygen_init failed.");
+        }
 
-        if(EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, RSA_KEYLEN) <= 0)
+        if(EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, RSA_KEYLEN) <= 0) {
             throw new CryptographicException("EVP_PKEY_CTX_set_rsa_keygen_bits failed.");
+        }
 
-        if(EVP_PKEY_keygen(ctx, &keypair) <= 0) 
+        if(EVP_PKEY_keygen(ctx, &keypair) <= 0) {
             throw new CryptographicException("EVP_PKEY_keygen failed.");
-
-        // EVP_PKEY_CTX_free(ctx);
+        }
 
         _hasPrivateKey = true;
-    } // this()
-
-// ----------------------------------------------------------
+    }
 
     public this(ubyte[] privateKey, ubyte[] password)
     {
@@ -65,21 +64,16 @@ public class RSA
         ubyte[] pk = cast(ubyte[])privateKey;
 
         BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-        if (password is null)
-        {
+        if (password is null) {
             keypair = PEM_read_bio_PrivateKey(bio, null, null, null);
-        }
-        else
-        {
+        } else {
             ubyte[] pwd = cast(ubyte[])password;
             pwd = pwd ~ '\0';
 
             keypair = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
         }
         BIO_free_all(bio);
-    } // this()
-
-// ----------------------------------------------------------
+    }
 
     public this(ubyte[] publicKey)
     {
@@ -93,15 +87,11 @@ public class RSA
         BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
         keypair = PEM_read_bio_PUBKEY(bio, null, null, null);
         BIO_free_all(bio);
-    } // this()
-
-// ----------------------------------------------------------
+    } 
 
     public ~this()
     {
-    } // ~this()
-
-// ---------------------------------------------------------- // ----------------------------------------------------------
+    }
 
     ubyte[] seal(const ubyte[] plaintext)
     {
@@ -123,8 +113,7 @@ public class RSA
         const ubyte* msg    = plaintext.ptr;
         size_t msgLen         = plaintext.length;
         
-        static if(size_t.sizeof == 8)
-        {
+        static if(size_t.sizeof == 8) {
             size_t maxHeaderL    = 2 + 2 + 4; // 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
             size_t maxEKL        = EVP_PKEY_size(keypair);
             size_t maxIVL        = EVP_MAX_IV_LENGTH;
@@ -151,8 +140,7 @@ version(OpenSSL10) {
 } else {
             EVP_CIPHER_CTX *rsaEncryptCtx = EVP_CIPHER_CTX_new();    
 }
-            scope(exit)
-            {
+            scope(exit) {
                 if (rsaEncryptCtx !is null) {
 version(OpenSSL10) {
                     EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);    
@@ -186,15 +174,12 @@ version(OpenSSL10) {
         }
         else
             assert(0);
-    } // seal()
-
-// ----------------------------------------------------------
+    }
 
     ubyte[] open(ubyte[] encMessage)
     {
         assert(encMessage.length > 8); // Encrypted message must be larger than header = ekl + ivl + messageLength
-        static if(size_t.sizeof == 8)
-        {
+        static if(size_t.sizeof == 8) {
             // Header: 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
             size_t maxHeaderL    = 2 + 2 + 4;
             size_t maxEKL        = EVP_PKEY_size(keypair);
@@ -221,19 +206,20 @@ version(OpenSSL10) {
             ubyte* _decMsg;
             auto decMsg = &_decMsg;
             *decMsg = cast(ubyte*)GC.malloc(encMsgLen + ivl);
-            if(decMsg == null)
+            if(decMsg == null) {
                 throw new CryptographicException("Malloc failed.");
+            }
 
 version(OpenSSL10) {
             EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);    
-            if(rsaDecryptCtx == null)
+            if(rsaDecryptCtx == null) {
                 throw new CryptographicException("Malloc failed.");
+            }
             EVP_CIPHER_CTX_init(rsaDecryptCtx);
 } else {
             EVP_CIPHER_CTX *rsaDecryptCtx = EVP_CIPHER_CTX_new();    
 }
-            scope(exit)
-            {
+            scope(exit) {
                 if (rsaDecryptCtx !is null) {
 version(OpenSSL10) {
                     EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);    
@@ -258,9 +244,7 @@ version(OpenSSL10) {
         }
         else
             assert(0);
-    } // open()
-
-// ---------------------------------------------------------- // ----------------------------------------------------------
+    }
 
     ubyte[] getPublicKey()
     {
@@ -273,21 +257,19 @@ version(OpenSSL10) {
         BIO_free_all(bio);
 
         return buffer;
-    } // getPublicKey()
-
-// ----------------------------------------------------------
+    } 
 
     public ubyte[] getPrivateKey(string password, int iterations = 25000, bool use3Des = false)
     {
-        if (!_hasPrivateKey)
+        if (!_hasPrivateKey) {
             return null;
+        }
 
         BIO* bio = BIO_new(BIO_s_mem());
 
-        if (password is null)
+        if (password is null) {
             PEM_write_bio_PKCS8PrivateKey(bio, keypair, null, null, 0, null, null);
-        else
-        {
+        } else {
             ubyte[] pwd = cast(ubyte[])password;
             pwd = pwd ~ '\0';
 
@@ -301,17 +283,16 @@ version(OpenSSL10) {
                 pwd.ptr);
         }
 
-        if(BIO_ctrl_pending(bio) == 0)
+        if(BIO_ctrl_pending(bio) == 0) {
             throw new CryptographicException("No private key written.");
+        }
 
         ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
         BIO_read(bio, buffer.ptr, cast(int)buffer.length);
         BIO_free_all(bio);
 
         return buffer;
-    } // getPrivateKey()
-
-// ---------------------------------------------------------- // ----------------------------------------------------------
+    }
 
     ubyte[] encrypt(const ubyte[] inMessage)
     in
@@ -329,34 +310,38 @@ version(OpenSSL10) {
         size_t inlen = inMessage.length; 
             
         ctx = EVP_PKEY_CTX_new(keypair,eng);
-        if (!ctx) 
+        if (!ctx)  {
             throw new CryptographicException("EVP_PKEY_CTX_new.");
-        scope(exit)
-        {
-            if (ctx !is null)
+        }
+        scope(exit) {
+            if (ctx !is null) {
                 EVP_PKEY_CTX_free(ctx);
+            }
         }
         
-        if (EVP_PKEY_encrypt_init(ctx) <= 0)
+        if (EVP_PKEY_encrypt_init(ctx) <= 0) {
             throw new CryptographicException("EVP_PKEY_encrypt_init failed.");
+        }
         
-        if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0)
+        if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0) {
             throw new CryptographicException("EVP_PKEY_CTX_set_rsa_padding failed.");
+        }
 
-        if (EVP_PKEY_encrypt(ctx, null, &outlen, in2, inlen) <= 0)
+        if (EVP_PKEY_encrypt(ctx, null, &outlen, in2, inlen) <= 0) {
             throw new CryptographicException("EVP_PKEY_encrypt failed.");
+        }
 
         out2 = cast(ubyte*)GC.malloc(outlen);
-        if(out2 == null)
+        if(out2 == null) {
             throw new CryptographicException("Malloc failed.");
+        }
             
-        if (EVP_PKEY_encrypt(ctx, out2, &outlen, in2, inlen) <= 0)
+        if (EVP_PKEY_encrypt(ctx, out2, &outlen, in2, inlen) <= 0) {
             throw new CryptographicException("EVP_PKEY_encrypt failed.");
-                
-        return (out2)[0 .. outlen];
-    } // encrypt()
+        }
 
-// ----------------------------------------------------------
+        return (out2)[0 .. outlen];
+    }
 
     ubyte[] decrypt(const ubyte[] inMessage)
     in
@@ -373,34 +358,38 @@ version(OpenSSL10) {
         size_t inlen = inMessage.length; 
             
         ctx = EVP_PKEY_CTX_new(keypair,eng);
-        if (!ctx) 
+        if (!ctx) {
             throw new CryptographicException("EVP_PKEY_CTX_new failed");
-        scope(exit)
-        {
-            if (ctx !is null)
+        }
+        scope(exit) {
+            if (ctx !is null) {
                 EVP_PKEY_CTX_free(ctx);
+            }
         }
         
-        if (EVP_PKEY_decrypt_init(ctx) <= 0)
+        if (EVP_PKEY_decrypt_init(ctx) <= 0) {
             throw new CryptographicException("EVP_PKEY_decrypt_init failed.");
+        }
 
-        if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0)
+        if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0) {
             throw new CryptographicException("EVP_PKEY_CTX_set_rsa_padding failed.");
+        }
 
-        if (EVP_PKEY_decrypt(ctx, null, &outlen, in2, inlen) <= 0)
+        if (EVP_PKEY_decrypt(ctx, null, &outlen, in2, inlen) <= 0) {
             throw new CryptographicException("EVP_PKEY_decrypt failed.");
+        }
 
         out2 = cast(ubyte*)GC.malloc(outlen);
-        if(out2 == null)
+        if(out2 == null) {
             throw new CryptographicException("Malloc failed.");
+        }
 
-        if (EVP_PKEY_decrypt(ctx, out2, &outlen, in2, inlen) <= 0)
+        if (EVP_PKEY_decrypt(ctx, out2, &outlen, in2, inlen) <= 0) {
             throw new CryptographicException("EVP_PKEY_encrypt failed.");
+        }
 
         return (out2)[0 .. outlen];
-    } // decrypt()
-
-// ---------------------------------------------------------- // ----------------------------------------------------------
+    }
 
     public ubyte[] sign(ubyte[] data, bool useSha256 = false)
     out (signature)
@@ -412,35 +401,38 @@ version(OpenSSL10) {
         EVP_MD_CTX *mdctx = null;
 
         mdctx = EVP_MD_CTX_new();
-        if (mdctx is null)
+        if (mdctx is null) {
             throw new CryptographicException("Unable to create the MD signing context.");
-        scope(exit)
-        {
-            if (mdctx !is null)
+        }
+        scope(exit) {
+            if (mdctx !is null) {
                 EVP_MD_CTX_free(mdctx);
+            }
         }
 
         auto alg = (!useSha256 ? EVP_sha384() : EVP_sha256());
 
-        if (EVP_DigestSignInit(mdctx, null, alg, null, keypair) != 1)
+        if (EVP_DigestSignInit(mdctx, null, alg, null, keypair) != 1) {
             throw new CryptographicException("Unable to initialize the signing digest.");
+        }
 
-        if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1)
+        if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1) {
             throw new CryptographicException("Unable to set sign data.");
+        }
 
         size_t signlen = 0;
-        if (EVP_DigestSignFinal(mdctx, null, &signlen) != 1)
+        if (EVP_DigestSignFinal(mdctx, null, &signlen) != 1) {
             throw new CryptographicException("Unable to calculate signature length.");
+        }
 
         ubyte[] sign = new ubyte[signlen];
-        if (EVP_DigestSignFinal(mdctx, sign.ptr, &signlen) != 1)
+        if (EVP_DigestSignFinal(mdctx, sign.ptr, &signlen) != 1) {
             throw new CryptographicException("Unable to finalize signature");
+        }
 
 
         return sign[0..signlen];
-    } // sign()
-
-// ----------------------------------------------------------
+    }
 
     public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
     in
@@ -452,21 +444,24 @@ version(OpenSSL10) {
         EVP_MD_CTX *mdctx = null;
 
         mdctx = EVP_MD_CTX_new();
-        if (mdctx is null)
+        if (mdctx is null) {
             throw new CryptographicException("Unable to create the MD signing context.");
-        scope(exit)
-        {
-            if (mdctx !is null)
+        }
+        scope(exit) {
+            if (mdctx !is null) {
                 EVP_MD_CTX_free(mdctx);
+            }
         }
 
         auto alg = (!useSha256 ? EVP_sha384() : EVP_sha256());
 
-        if (EVP_DigestVerifyInit(mdctx, null, alg, null, keypair) != 1)
+        if (EVP_DigestVerifyInit(mdctx, null, alg, null, keypair) != 1) {
             throw new CryptographicException("Unable to initialize the verification digest.");
+        }
 
-        if (EVP_DigestVerifyUpdate(mdctx, data.ptr, data.length) != 1)
+        if (EVP_DigestVerifyUpdate(mdctx, data.ptr, data.length) != 1) {
             throw new CryptographicException("Unable to set verify data.");
+        }
 
         int ret = EVP_DigestVerifyFinal(mdctx, signature.ptr, signature.length);
 
