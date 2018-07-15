@@ -2,6 +2,7 @@ module secured.openssl;
 
 version(OpenSSL):
 import deimos.openssl.evp;
+import core.stdc.stdint;
 
 private:
 
@@ -10,16 +11,31 @@ enum int EVP_PKEY_CTRL_HKDF_MD = (EVP_PKEY_ALG_CTRL + 3);
 enum int EVP_PKEY_CTRL_HKDF_SALT = (EVP_PKEY_ALG_CTRL + 4);
 enum int EVP_PKEY_CTRL_HKDF_KEY = (EVP_PKEY_ALG_CTRL + 5);
 enum int EVP_PKEY_CTRL_HKDF_INFO = (EVP_PKEY_ALG_CTRL + 6);
+enum int EVP_PKEY_CTRL_HKDF_MODE = (EVP_PKEY_ALG_CTRL + 7);
+enum int EVP_PKEY_CTRL_PASS = (EVP_PKEY_ALG_CTRL + 8);
+enum int EVP_PKEY_CTRL_SCRYPT_SALT = (EVP_PKEY_ALG_CTRL + 9);
+enum int EVP_PKEY_CTRL_SCRYPT_N = (EVP_PKEY_ALG_CTRL + 10);
+enum int EVP_PKEY_CTRL_SCRYPT_R = (EVP_PKEY_ALG_CTRL + 11);
+enum int EVP_PKEY_CTRL_SCRYPT_P = (EVP_PKEY_ALG_CTRL + 12);
+enum int EVP_PKEY_CTRL_SCRYPT_MAXMEM_BYTES = (EVP_PKEY_ALG_CTRL + 13);
 
-public:
 extern (C):
 nothrow:
+public:
+
+ulong ERR_get_error();
+ulong ERR_peek_error();
+void ERR_error_string_n(ulong e, char *buf, size_t len);
 
 EVP_MD_CTX* EVP_MD_CTX_new();
 void EVP_MD_CTX_free(EVP_MD_CTX* free);
 void EVP_MD_CIPHER_free(EVP_CIPHER_CTX* free);
+int EVP_PBE_scrypt(const char *pass, size_t passlen, const ubyte *salt, size_t saltlen, ulong N, ulong r, ulong p, ulong maxmem, ubyte *key, size_t keylen);
+
+extern(D):
 
 enum int EVP_PKEY_HKDF = 1036;
+enum int EVP_PKEY_SCRYPT = 973;
 
 int EVP_PKEY_CTX_set_hkdf_md(EVP_PKEY_CTX *pctx, const EVP_MD *md) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MD, 0, cast(void *)(md));
@@ -35,4 +51,24 @@ int EVP_PKEY_CTX_set1_hkdf_key(EVP_PKEY_CTX *pctx, ubyte[] key) {
 
 int EVP_PKEY_CTX_add1_hkdf_info(EVP_PKEY_CTX *pctx, string info) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_INFO, cast(int)(cast(ubyte[])info).length, cast(void *)info);
+}
+
+int EVP_PKEY_CTX_set1_pbe_pass(EVP_PKEY_CTX *pctx, ubyte[] password) {
+    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_PASS, cast(int)password.length, cast(void *)(password));
+}
+
+int EVP_PKEY_CTX_set1_scrypt_salt(EVP_PKEY_CTX *pctx, ubyte[] salt) {
+    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_SCRYPT_SALT, cast(int)salt.length, cast(void *)(salt));
+}
+
+int EVP_PKEY_CTX_set_scrypt_N(EVP_PKEY_CTX *pctx, ulong n) {
+    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_SCRYPT_N, 0, cast(void*)n);
+}
+
+int EVP_PKEY_CTX_set_scrypt_r(EVP_PKEY_CTX *pctx, ulong r) {
+    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_SCRYPT_R, 0, cast(void*)r);
+}
+
+int EVP_PKEY_CTX_set_scrypt_p(EVP_PKEY_CTX *pctx, ulong p) {
+    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_SCRYPT_P, 0, cast(void*)p);
 }

@@ -19,15 +19,15 @@ import secured.util;
 
 
 @safe public ubyte[] hmac(ubyte[] key, ubyte[] data) {
-    return hmac_ex(key, data, HashFunction.SHA2_384);
+    return hmac_ex(key, data, HashAlgorithm.SHA2_384);
 }
 
 @safe public bool hmac_verify(ubyte[] test, ubyte[] key, ubyte[] data) {
-    ubyte[] hash = hmac_ex(key, data, HashFunction.SHA2_384);
+    ubyte[] hash = hmac_ex(key, data, HashAlgorithm.SHA2_384);
     return constantTimeEquality(test, hash);
 }
 
-@trusted public ubyte[] hmac_ex(ubyte[] key, ubyte[] data, HashFunction func)
+@trusted public ubyte[] hmac_ex(ubyte[] key, ubyte[] data, HashAlgorithm func)
 {
     if (key.length > getHashLength(func)) {
         throw new CryptographicException(format("HMAC key must be less than or equal to %s bytes in length.", getHashLength(func)));
@@ -47,7 +47,7 @@ import secured.util;
         }
 
         //Initialize the hash algorithm
-        auto md = getOpenSSLHashFunction(func);
+        auto md = getOpenSSLHashAlgorithm(func);
         if (EVP_DigestInit_ex(mdctx, md, null) != 1) {
             throw new CryptographicException("Unable to create hash context.");
         }
@@ -80,7 +80,7 @@ import secured.util;
 
     version(Botan)
     {
-        auto sha = new HMAC(getBotanHashFunction(func));
+        auto sha = new HMAC(getBotanHashAlgorithm(func));
         scope(exit) {
             sha.clear();
         }
@@ -97,7 +97,7 @@ import secured.util;
     }
 }
 
-@safe public bool hmac_verify_ex(ubyte[] test, ubyte[] key, ubyte[] data, HashFunction func){
+@safe public bool hmac_verify_ex(ubyte[] test, ubyte[] key, ubyte[] data, HashAlgorithm func){
     ubyte[] hash = hmac_ex(key, data, func);
     return constantTimeEquality(test, hash);
 }
@@ -116,9 +116,9 @@ unittest {
 
     writeln("Testing HMAC Extended:");
 
-    ubyte[] vec1 = hmac_ex(key, cast(ubyte[])"", HashFunction.SHA2_384);
-    ubyte[] vec2 = hmac_ex(key, cast(ubyte[])"abc", HashFunction.SHA2_384);
-    ubyte[] vec3 = hmac_ex(key, cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashFunction.SHA2_384);
+    ubyte[] vec1 = hmac_ex(key, cast(ubyte[])"", HashAlgorithm.SHA2_384);
+    ubyte[] vec2 = hmac_ex(key, cast(ubyte[])"abc", HashAlgorithm.SHA2_384);
+    ubyte[] vec3 = hmac_ex(key, cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashAlgorithm.SHA2_384);
 
     writeln(toHexString!(LetterCase.lower)(vec1));
     writeln(toHexString!(LetterCase.lower)(vec2));
@@ -131,6 +131,6 @@ unittest {
     ubyte[32] keyshort = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
-    ubyte[] verify_hash = hmac_ex(keyshort, cast(ubyte[])"", HashFunction.SHA2_256);
-    assert(hmac_verify_ex(verify_hash, keyshort, cast(ubyte[])"", HashFunction.SHA2_256));
+    ubyte[] verify_hash = hmac_ex(keyshort, cast(ubyte[])"", HashAlgorithm.SHA2_256);
+    assert(hmac_verify_ex(verify_hash, keyshort, cast(ubyte[])"", HashAlgorithm.SHA2_256));
 }

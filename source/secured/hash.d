@@ -15,7 +15,7 @@ import botan.hash.sha2_64;
 
 import secured.util;
 
-public enum HashFunction : ubyte {
+public enum HashAlgorithm : ubyte {
     None,
     SHA2_224,
     SHA2_256,
@@ -30,15 +30,15 @@ public enum HashFunction : ubyte {
 }
 
 @safe public ubyte[] hash(ubyte[] data) {
-    return hash_ex(data, HashFunction.SHA2_384);
+    return hash_ex(data, HashAlgorithm.SHA2_384);
 }
 
 @safe public bool hash_verify(ubyte[] test, ubyte[] data) {
-    ubyte[] hash = hash_ex(data, HashFunction.SHA2_384);
+    ubyte[] hash = hash_ex(data, HashAlgorithm.SHA2_384);
     return constantTimeEquality(hash, test);
 }
 
-@trusted public ubyte[] hash_ex(ubyte[] data, HashFunction func)
+@trusted public ubyte[] hash_ex(ubyte[] data, HashAlgorithm func)
 {
     version(OpenSSL)
     {
@@ -54,7 +54,7 @@ public enum HashFunction : ubyte {
         }
 
         //Initialize the hash algorithm
-        if (EVP_DigestInit_ex(mdctx, getOpenSSLHashFunction(func), null) < 0) {
+        if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
             throw new CryptographicException("Unable to create hash context.");
         }
 
@@ -75,7 +75,7 @@ public enum HashFunction : ubyte {
 
     version(Botan)
     {
-        auto sha = getBotanHashFunction(func);
+        auto sha = getBotanHashAlgorithm(func);
         scope(exit) {
             sha.clear();
         }
@@ -92,7 +92,7 @@ public enum HashFunction : ubyte {
     }
 }
 
-@safe public bool hash_verify_ex(ubyte[] test, ubyte[] data, HashFunction func) {
+@safe public bool hash_verify_ex(ubyte[] test, ubyte[] data, HashAlgorithm func) {
     ubyte[] hash = hash_ex(data, func);
     return constantTimeEquality(hash, test);
 }
@@ -102,10 +102,10 @@ unittest {
 
     writeln("Testing Byte Array Hash:");
 
-    ubyte[] vec1 = hash_ex(cast(ubyte[])"", HashFunction.SHA2_384);
-    ubyte[] vec2 = hash_ex(cast(ubyte[])"abc", HashFunction.SHA2_384);
-    ubyte[] vec3 = hash_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashFunction.SHA2_384);
-    ubyte[] vec4 = hash_ex(cast(ubyte[])"The quick brown fox jumps over the lazy dog.", HashFunction.SHA2_384);
+    ubyte[] vec1 = hash_ex(cast(ubyte[])"", HashAlgorithm.SHA2_384);
+    ubyte[] vec2 = hash_ex(cast(ubyte[])"abc", HashAlgorithm.SHA2_384);
+    ubyte[] vec3 = hash_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashAlgorithm.SHA2_384);
+    ubyte[] vec4 = hash_ex(cast(ubyte[])"The quick brown fox jumps over the lazy dog.", HashAlgorithm.SHA2_384);
 
     writeln(toHexString!(LetterCase.lower)(vec1));
     writeln(toHexString!(LetterCase.lower)(vec2));
@@ -120,15 +120,15 @@ unittest {
 
 
 @safe public ubyte[] hash(string path) {
-    return hash_ex(path, HashFunction.SHA2_384);
+    return hash_ex(path, HashAlgorithm.SHA2_384);
 }
 
 @safe public bool hash_verify(string path, ubyte[] test) {
-    ubyte[] hash = hash_ex(path, HashFunction.SHA2_384);
+    ubyte[] hash = hash_ex(path, HashAlgorithm.SHA2_384);
     return constantTimeEquality(hash, test);
 }
 
-@trusted public ubyte[] hash_ex(string path, HashFunction func)
+@trusted public ubyte[] hash_ex(string path, HashAlgorithm func)
 {
     //Open the file for reading
     auto fsfile = File(path, "rb");
@@ -152,7 +152,7 @@ unittest {
         }
 
         //Initialize the hash algorithm
-        if (EVP_DigestInit_ex(mdctx, getOpenSSLHashFunction(func), null) < 0) {
+        if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
             throw new CryptographicException("Unable to create hash context.");
         }
 
@@ -175,7 +175,7 @@ unittest {
 
     version(Botan)
     {
-        auto sha = getBotanHashFunction(func);
+        auto sha = getBotanHashAlgorithm(func);
         scope(exit) {
             sha.clear();
         }
@@ -195,7 +195,7 @@ unittest {
     }
 }
 
-@safe public bool hash_verify_ex(string path, HashFunction func, ubyte[] test) {
+@safe public bool hash_verify_ex(string path, HashAlgorithm func, ubyte[] test) {
     ubyte[] hash = hash_ex(path, func);
     return constantTimeEquality(hash, test);
 }
@@ -209,7 +209,7 @@ unittest {
     f.rawWrite("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq");
     f.close();
 
-    ubyte[] vec = hash_ex("hashtest.txt", HashFunction.SHA2_384);
+    ubyte[] vec = hash_ex("hashtest.txt", HashAlgorithm.SHA2_384);
     writeln(toHexString!(LetterCase.lower)(vec));
     assert(toHexString!(LetterCase.lower)(vec) == "3391fdddfc8dc7393707a65b1b4709397cf8b1d162af05abfe8f450de5f36bc6b0455a8520bc4e6f5fe95b1fe3c8452b");
 
@@ -217,15 +217,15 @@ unittest {
 }
 
 version(OpenSSL) {
-@trusted package const(EVP_MD)* getOpenSSLHashFunction(HashFunction func) {
+@trusted package const(EVP_MD)* getOpenSSLHashAlgorithm(HashAlgorithm func) {
     import std.conv;
     import std.format;
 
     switch (func) {
-        case HashFunction.SHA2_224: return EVP_sha224();
-        case HashFunction.SHA2_256: return EVP_sha256();
-        case HashFunction.SHA2_384: return EVP_sha384();
-        case HashFunction.SHA2_512: return EVP_sha512();
+        case HashAlgorithm.SHA2_224: return EVP_sha224();
+        case HashAlgorithm.SHA2_256: return EVP_sha256();
+        case HashAlgorithm.SHA2_384: return EVP_sha384();
+        case HashAlgorithm.SHA2_512: return EVP_sha512();
         default:
             throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
     }
@@ -233,40 +233,40 @@ version(OpenSSL) {
 }
 
 version(Botan) {
-@safe package auto getBotanHashFunction(HashFunction func) {
+@safe package auto getBotanHashAlgorithm(HashAlgorithm func) {
     import std.conv;
     import std.format;
 
     switch (func) {
-        case HashFunction.SHA2_224: return new SHA224();
-        case HashFunction.SHA2_256: return new SHA256();
-        case HashFunction.SHA2_384: return new SHA384();
-        case HashFunction.SHA2_512: return new SHA512();
-        case HashFunction.SHA3_224: return new Keccak_1600(224);
-        case HashFunction.SHA3_256: return new Keccak_1600(256);
-        case HashFunction.SHA3_384: return new Keccak_1600(384);
-        case HashFunction.SHA3_512: return new Keccak_1600(512);
+        case HashAlgorithm.SHA2_224: return new SHA224();
+        case HashAlgorithm.SHA2_256: return new SHA256();
+        case HashAlgorithm.SHA2_384: return new SHA384();
+        case HashAlgorithm.SHA2_512: return new SHA512();
+        case HashAlgorithm.SHA3_224: return new Keccak_1600(224);
+        case HashAlgorithm.SHA3_256: return new Keccak_1600(256);
+        case HashAlgorithm.SHA3_384: return new Keccak_1600(384);
+        case HashAlgorithm.SHA3_512: return new Keccak_1600(512);
         default:
             throw new CryptographicException(format("Hash Function '%s' is not supported by Botan.", to!string(func)));
     }
 }
 }
 
-@safe package int getHashLength(HashFunction func) {
+@safe package int getHashLength(HashAlgorithm func) {
     import std.conv;
     import std.format;
 
     switch (func) {
-        case HashFunction.SHA2_224: return 24;
-        case HashFunction.SHA2_256: return 32;
-        case HashFunction.SHA2_384: return 48;
-        case HashFunction.SHA2_512: return 64;
-        case HashFunction.SHA2_512_224: return 24;
-        case HashFunction.SHA2_512_256: return 32;
-        case HashFunction.SHA3_224: return 24;
-        case HashFunction.SHA3_256: return 32;
-        case HashFunction.SHA3_384: return 48;
-        case HashFunction.SHA3_512: return 64;
+        case HashAlgorithm.SHA2_224: return 24;
+        case HashAlgorithm.SHA2_256: return 32;
+        case HashAlgorithm.SHA2_384: return 48;
+        case HashAlgorithm.SHA2_512: return 64;
+        case HashAlgorithm.SHA2_512_224: return 24;
+        case HashAlgorithm.SHA2_512_256: return 32;
+        case HashAlgorithm.SHA3_224: return 24;
+        case HashAlgorithm.SHA3_256: return 32;
+        case HashAlgorithm.SHA3_384: return 48;
+        case HashAlgorithm.SHA3_512: return 64;
         default:
             throw new CryptographicException(format("Hash Function '%s'", to!string(func)));
     }
