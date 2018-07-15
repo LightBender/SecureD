@@ -11,6 +11,7 @@ import deimos.openssl.rsa;
 import deimos.openssl.engine;
 
 import secured.random;
+import secured.symmetric;
 import secured.util;
 
 // ----------------------------------------------------------
@@ -95,6 +96,11 @@ public class RSA
 
     ubyte[] seal(const ubyte[] plaintext)
     {
+        return this.seal(plaintext, SymmetricAlgorithm.AES256_CTR);
+    }
+
+    ubyte[] seal(const ubyte[] plaintext, SymmetricAlgorithm algorithm)
+    {
         ubyte* _encMsg;
         ubyte* _ek;
         size_t _ekl;
@@ -150,7 +156,7 @@ version(OpenSSL10) {
                 }
             }
 
-            if(!EVP_SealInit(rsaEncryptCtx, EVP_aes_256_ctr(), ek, cast(int*)ekl, *iv, &keypair, 1))
+            if(!EVP_SealInit(rsaEncryptCtx, getOpenSslCipher(algorithm), ek, cast(int*)ekl, *iv, &keypair, 1))
                 throw new CryptographicException("CEVP_SealInit failed.");
 
             if(!EVP_SealUpdate(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen, cast(const ubyte*)msg, cast(int)msgLen))
@@ -177,6 +183,11 @@ version(OpenSSL10) {
     }
 
     ubyte[] open(ubyte[] encMessage)
+    {
+        return this.open(encMessage, SymmetricAlgorithm.AES256_CTR);
+    }
+
+    ubyte[] open(ubyte[] encMessage, SymmetricAlgorithm algorithm)
     {
         assert(encMessage.length > 8); // Encrypted message must be larger than header = ekl + ivl + messageLength
         static if(size_t.sizeof == 8) {
@@ -229,7 +240,7 @@ version(OpenSSL10) {
                 }
             }
 
-            if(!EVP_OpenInit(rsaDecryptCtx, EVP_aes_256_ctr(), ek, ekl, iv, keypair))
+            if(!EVP_OpenInit(rsaDecryptCtx, getOpenSslCipher(algorithm), ek, ekl, iv, keypair))
                 throw new CryptographicException("EVP_OpenInit failed.");
 
             if(!EVP_OpenUpdate(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen, encMsg, cast(int)encMsgLen))

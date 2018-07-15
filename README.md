@@ -39,18 +39,12 @@ All API's are unittested using D's built in unittests. Any developer can verify 
   - SHA3: 224, 256, 384, 512
 - Symmetric:
   - Algorithms: AES (128/192/256)
-  - Modes: CTR, CBC (PKCS7 Padding)
+  - Modes: GCM, CCM, CTR, OFB, CFB, CBC (PKCS7 Padding)
 - KDF:              PBKDF2, HKDF, SCrypt
-- Asymmetric:       ECC: Curve25519 (Default), P256, P384, P521 - (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
-- Asymmetric:       RSA-AES-256-CTR Seal/Open, RSA only Encrypt/Decrypt and RSA only Sign/Verify
+- Asymmetric:       ECC: P256, P384, P521 - (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
+- Asymmetric:       RSA-AES Seal/Open, RSA Encrypt/Decrypt, and RSA Sign/Verify
 - RNG:              System RNG on POSIX and Windows
 - Other:            Constant Time Equality
-
-## Why these Algorithms?
-
-AES-CTR is an alternative for GCM that offers greater security for long-term data storage when paired with a strong HMAC. GCM use a 96-bit authentication tag where the HMAC tag is at least 256 bits.
-
-AES-CBC is included for compatibility with existin systems and should not be used for new projects.
 
 ## Versioning
 
