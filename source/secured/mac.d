@@ -3,17 +3,8 @@ module secured.mac;
 import std.stdio;
 import std.format;
 
-version(OpenSSL)
-{
 import secured.openssl;
 import deimos.openssl.evp;
-}
-version(Botan)
-{
-import botan.mac.hmac;
-import botan.hash.sha2_32;
-import botan.hash.sha2_64;
-}
 import secured.hash;
 import secured.util;
 
@@ -33,68 +24,47 @@ import secured.util;
         throw new CryptographicException(format("HMAC key must be less than or equal to %s bytes in length.", getHashLength(func)));
     }
 
-    version(OpenSSL)
-    {
-        //Create the OpenSSL context
-        EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-        if (mdctx == null) {
-            throw new CryptographicException("Unable to create OpenSSL context.");
+    //Create the OpenSSL context
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    if (mdctx == null) {
+        throw new CryptographicException("Unable to create OpenSSL context.");
+    }
+    scope(exit) {
+        if(mdctx !is null) {
+            EVP_MD_CTX_free(mdctx);
         }
-        scope(exit) {
-            if(mdctx !is null) {
-                EVP_MD_CTX_free(mdctx);
-            }
-        }
-
-        //Initialize the hash algorithm
-        auto md = getOpenSSLHashAlgorithm(func);
-        if (EVP_DigestInit_ex(mdctx, md, null) != 1) {
-            throw new CryptographicException("Unable to create hash context.");
-        }
-
-        //Create the HMAC key context
-        auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
-        scope(exit) {
-            if(pkey !is null) {
-                EVP_PKEY_free(pkey);
-            }
-        }
-        if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1) {
-            throw new CryptographicException("Unable to create HMAC key context.");
-        }
-
-        //Run the provided data through the digest algorithm
-        if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1) {
-            throw new CryptographicException("Error while updating digest.");
-        }
-
-        //Copy the OpenSSL digest to our D buffer.
-        size_t digestlen;
-        ubyte[] digest = new ubyte[getHashLength(func)];
-        if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0) {
-            throw new CryptographicException("Error while retrieving the digest.");
-        }
-
-        return digest;
     }
 
-    version(Botan)
-    {
-        auto sha = new HMAC(getBotanHashAlgorithm(func));
-        scope(exit) {
-            sha.clear();
-        }
-        sha.setKey(key.ptr, key.length);
-
-        sha.update(data);
-
-        auto digestvec = sha.finished();
-        ubyte[] digest = new ubyte[digestvec.length];
-        for(int i = 0; i<digestvec.length; i++) {
-            digest[i] = digestvec[i];
-        }
-        return digest;
+    //Initialize the hash algorithm
+    auto md = getOpenSSLHashAlgorithm(func);
+    if (EVP_DigestInit_ex(mdctx, md, null) != 1) {
+        throw new CryptographicException("Unable to create hash context.");
     }
+
+    //Create the HMAC key context
+    auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
+    scope(exit) {
+        if(pkey !is null) {
+            EVP_PKEY_free(pkey);
+        }
+    }
+    if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1) {
+        throw new CryptographicException("Unable to create HMAC key context.");
+    }
+
+    //Run the provided data through the digest algorithm
+    if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1) {
+        throw new CryptographicException("Error while updating digest.");
+    }
+
+    //Copy the OpenSSL digest to our D buffer.
+    size_t digestlen;
+    ubyte[] digest = new ubyte[getHashLength(func)];
+    if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0) {
+        throw new CryptographicException("Error while retrieving the digest.");
+    }
+
+    return digest;
 }
 
 @safe public bool hmac_verify_ex(ubyte[] test, ubyte[] key, ubyte[] data, HashAlgorithm func){

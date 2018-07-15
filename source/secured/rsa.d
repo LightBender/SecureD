@@ -2,8 +2,6 @@ module secured.rsa;
 
 import core.memory;
 
-version(OpenSSL)
-{
 import secured.openssl;
 import deimos.openssl.evp;
 import deimos.openssl.rand;
@@ -11,12 +9,6 @@ import deimos.openssl.pem;
 import deimos.openssl.bio;
 import deimos.openssl.rsa;
 import deimos.openssl.engine;
-}
-
-version(Botan)
-{
-    static assert(0, "Botan is currently not support in module secured.rsa.");
-}
 
 import secured.random;
 import secured.util;

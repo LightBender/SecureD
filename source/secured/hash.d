@@ -2,16 +2,8 @@ module secured.hash;
 
 import std.stdio;
 
-version(OpenSSL)
-{
 import secured.openssl;
 import deimos.openssl.evp;
-}
-version(Botan)
-{
-import botan.hash.sha2_32;
-import botan.hash.sha2_64;
-}
 
 import secured.util;
 
@@ -40,56 +32,35 @@ public enum HashAlgorithm : ubyte {
 
 @trusted public ubyte[] hash_ex(ubyte[] data, HashAlgorithm func)
 {
-    version(OpenSSL)
-    {
-        //Create the OpenSSL context
-        EVP_MD_CTX *mdctx;
-        if ((mdctx = EVP_MD_CTX_new()) == null) {
-            throw new CryptographicException("Unable to create OpenSSL context.");
+    //Create the OpenSSL context
+    EVP_MD_CTX *mdctx;
+    if ((mdctx = EVP_MD_CTX_new()) == null) {
+        throw new CryptographicException("Unable to create OpenSSL context.");
+    }
+    scope(exit) {
+        if(mdctx !is null) {
+            EVP_MD_CTX_free(mdctx);
         }
-        scope(exit) {
-            if(mdctx !is null) {
-                EVP_MD_CTX_free(mdctx);
-            }
-        }
-
-        //Initialize the hash algorithm
-        if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
-            throw new CryptographicException("Unable to create hash context.");
-        }
-
-        //Run the provided data through the digest algorithm
-        if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0) {
-            throw new CryptographicException("Error while updating digest.");
-        }
-
-        //Copy the OpenSSL digest to our D buffer.
-        uint digestlen;
-        ubyte[] digest = new ubyte[getHashLength(func)];
-        if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0) {
-            throw new CryptographicException("Error while retrieving the digest.");
-        }
-
-        return digest;
     }
 
-    version(Botan)
-    {
-        auto sha = getBotanHashAlgorithm(func);
-        scope(exit) {
-            sha.clear();
-        }
-
-        sha.update(data.ptr, data.length);
-
-        auto digestvec = sha.finished();
-        ubyte[] digest = new ubyte[digestvec.length];
-        for(int i = 0; i<digestvec.length; i++) {
-            digest[i] = digestvec[i];
-        }
-
-        return digest;
+    //Initialize the hash algorithm
+    if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
+        throw new CryptographicException("Unable to create hash context.");
     }
+
+    //Run the provided data through the digest algorithm
+    if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0) {
+        throw new CryptographicException("Error while updating digest.");
+    }
+
+    //Copy the OpenSSL digest to our D buffer.
+    uint digestlen;
+    ubyte[] digest = new ubyte[getHashLength(func)];
+    if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0) {
+        throw new CryptographicException("Error while retrieving the digest.");
+    }
+
+    return digest;
 }
 
 @safe public bool hash_verify_ex(ubyte[] test, ubyte[] data, HashAlgorithm func) {
@@ -138,61 +109,37 @@ unittest {
         }
     }
 
-    version(OpenSSL)
-    {
-        //Create the OpenSSL context
-        EVP_MD_CTX *mdctx;
-        if ((mdctx = EVP_MD_CTX_new()) == null) {
-            throw new CryptographicException("Unable to create OpenSSL context.");
+    //Create the OpenSSL context
+    EVP_MD_CTX *mdctx;
+    if ((mdctx = EVP_MD_CTX_new()) == null) {
+        throw new CryptographicException("Unable to create OpenSSL context.");
+    }
+    scope(exit) {
+        if(mdctx !is null) {
+            EVP_MD_CTX_free(mdctx);
         }
-        scope(exit) {
-            if(mdctx !is null) {
-                EVP_MD_CTX_free(mdctx);
-            }
-        }
-
-        //Initialize the hash algorithm
-        if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
-            throw new CryptographicException("Unable to create hash context.");
-        }
-
-        //Read the file in chunks and update the Digest
-        foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE)) {
-            if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0) {
-                throw new CryptographicException("Error while updating digest.");
-            }
-        }
-
-        //Copy the OpenSSL digest to our D buffer.
-        uint digestlen;
-        ubyte[] digest = new ubyte[getHashLength(func)];
-        if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0) {
-            throw new CryptographicException("Error while retrieving the digest.");
-        }
-
-        return digest;
     }
 
-    version(Botan)
-    {
-        auto sha = getBotanHashAlgorithm(func);
-        scope(exit) {
-            sha.clear();
-        }
-
-        //Read the file in chunks and update the Digest
-        foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE)) {
-            sha.update(data.ptr, data.length);
-        }
-
-        auto digestvec = sha.finished();
-        ubyte[] digest = new ubyte[digestvec.length];
-        for(int i = 0; i<digestvec.length; i++) {
-            digest[i] = digestvec[i];
-        }
-
-        return digest;
+    //Initialize the hash algorithm
+    if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
+        throw new CryptographicException("Unable to create hash context.");
     }
+
+    //Read the file in chunks and update the Digest
+    foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE)) {
+        if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0) {
+            throw new CryptographicException("Error while updating digest.");
+        }
+    }
+
+    //Copy the OpenSSL digest to our D buffer.
+    uint digestlen;
+    ubyte[] digest = new ubyte[getHashLength(func)];
+    if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0) {
+        throw new CryptographicException("Error while retrieving the digest.");
+    }
+
+    return digest;
 }
 
 @safe public bool hash_verify_ex(string path, HashAlgorithm func, ubyte[] test) {
@@ -216,7 +163,6 @@ unittest {
     remove("hashtest.txt");
 }
 
-version(OpenSSL) {
 @trusted package const(EVP_MD)* getOpenSSLHashAlgorithm(HashAlgorithm func) {
     import std.conv;
     import std.format;
@@ -229,27 +175,6 @@ version(OpenSSL) {
         default:
             throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
     }
-}
-}
-
-version(Botan) {
-@safe package auto getBotanHashAlgorithm(HashAlgorithm func) {
-    import std.conv;
-    import std.format;
-
-    switch (func) {
-        case HashAlgorithm.SHA2_224: return new SHA224();
-        case HashAlgorithm.SHA2_256: return new SHA256();
-        case HashAlgorithm.SHA2_384: return new SHA384();
-        case HashAlgorithm.SHA2_512: return new SHA512();
-        case HashAlgorithm.SHA3_224: return new Keccak_1600(224);
-        case HashAlgorithm.SHA3_256: return new Keccak_1600(256);
-        case HashAlgorithm.SHA3_384: return new Keccak_1600(384);
-        case HashAlgorithm.SHA3_512: return new Keccak_1600(512);
-        default:
-            throw new CryptographicException(format("Hash Function '%s' is not supported by Botan.", to!string(func)));
-    }
-}
 }
 
 @safe package int getHashLength(HashAlgorithm func) {

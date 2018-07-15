@@ -1,6 +1,5 @@
 module secured.openssl;
 
-version(OpenSSL):
 import deimos.openssl.evp;
 import core.stdc.stdint;
 

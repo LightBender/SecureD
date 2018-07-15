@@ -3,23 +3,10 @@ module secured.ecc;
 import std.stdio;
 import std.string;
 
-version(OpenSSL)
-{
 import deimos.openssl.evp;
 import deimos.openssl.rand;
 import deimos.openssl.pem;
 import deimos.openssl.bio;
-}
-version(Botan)
-{
-import core.time;
-import botan.filters.data_src;
-import botan.rng.auto_rng;
-import botan.pubkey.algo.ecc_key;
-import botan.pubkey.algo.ec_group;
-import botan.pubkey.algo.ecdh;
-import botan.pubkey.algo.ecdsa;
-}
 
 import secured.hash;
 import secured.kdf;
@@ -37,354 +24,241 @@ public enum EccCurve
 
 public class EllipticCurve
 {
-    version(OpenSSL)
-    {
     private EVP_PKEY_CTX* paramsctx;
     private EVP_PKEY* params;
     private EVP_PKEY_CTX* keyctx;
     private EVP_PKEY* key;
-    }
-    version(Botan)
-    {
-    private ECPublicKey pubKey;
-    private ECPrivateKey privKey;
-    }
 
     private bool _hasPrivateKey;
     public @property bool hasPrivateKey() { return _hasPrivateKey; }
 
     public this(EccCurve curve = EccCurve.P384)
     {
-        version(OpenSSL)
-        {
-            //Reseed the OpenSSL RNG every time we create a new ECC Key to ensure that the result is truely random in threading/forking scenarios.
-            ubyte[] seedbuf = random(32);
-            RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
+        //Reseed the OpenSSL RNG every time we create a new ECC Key to ensure that the result is truely random in threading/forking scenarios.
+        ubyte[] seedbuf = random(32);
+        RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
 
-            //Generate the key parameters
-            paramsctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, null);
-            if (paramsctx is null)
-                throw new CryptographicException("Cannot get an OpenSSL public key context.");
-            if (EVP_PKEY_paramgen_init(paramsctx) < 1)
-                throw new CryptographicException("Cannot initialize the OpenSSL public key context.");
-            if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, getOpenSSLCurveId(curve)) < 1)
-                throw new CryptographicException("Cannot set the requested curve.");
-            if (EVP_PKEY_paramgen(paramsctx, &params) < 1)
-                throw new CryptographicException("Unable to generate the key parameters.");
-
-            //Generate the public and private keys
-            keyctx = EVP_PKEY_CTX_new(params, null);
-            if (keyctx is null)
-                throw new CryptographicException("Cannot get an OpenSSL private key context.");
-            if (EVP_PKEY_keygen_init(keyctx) < 1)
-                throw new CryptographicException("Cannot initialize the OpenSSL private key context.");
-            if (EVP_PKEY_keygen(keyctx, &key) < 1)
-                throw new CryptographicException("Unable to generate the private key.");
+        //Generate the key parameters
+        paramsctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, null);
+        if (paramsctx is null) {
+            throw new CryptographicException("Cannot get an OpenSSL public key context.");
+        }
+        if (EVP_PKEY_paramgen_init(paramsctx) < 1) {
+            throw new CryptographicException("Cannot initialize the OpenSSL public key context.");
+        }
+        if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, getOpenSSLCurveId(curve)) < 1) {
+            throw new CryptographicException("Cannot set the requested curve.");
+        }
+        if (EVP_PKEY_paramgen(paramsctx, &params) < 1) {
+            throw new CryptographicException("Unable to generate the key parameters.");
         }
 
-        version(Botan)
-        {
-            auto rng = new AutoSeededRNG();
-            auto ecg = ECGroup(getBotanCurveId(curve));
-            auto key = ECDHPrivateKey(rng, ecg);
-            privKey = key.m_priv;
-            pubKey = cast(ECPublicKey)key.m_priv;
-    }
+        //Generate the public and private keys
+        keyctx = EVP_PKEY_CTX_new(params, null);
+        if (keyctx is null) {
+            throw new CryptographicException("Cannot get an OpenSSL private key context.");
+        }
+        if (EVP_PKEY_keygen_init(keyctx) < 1) {
+            throw new CryptographicException("Cannot initialize the OpenSSL private key context.");
+        }
+        if (EVP_PKEY_keygen(keyctx, &key) < 1) {
+            throw new CryptographicException("Unable to generate the private key.");
+        }
 
         _hasPrivateKey = true;
     }
 
     public this(string privateKey, string password)
     {
-        version(OpenSSL)
-        {
-            //Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
-            ubyte[] seedbuf = random(32);
-            RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
+        //Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
+        ubyte[] seedbuf = random(32);
+        RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
 
-            _hasPrivateKey = true;
-            ubyte[] pk = cast(ubyte[])privateKey;
+        _hasPrivateKey = true;
+        ubyte[] pk = cast(ubyte[])privateKey;
 
-            BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-            if (password is null)
-            {
-                key = PEM_read_bio_PrivateKey(bio, null, null, null);
-            }
-            else
-            {
-                ubyte[] pwd = cast(ubyte[])password;
-                pwd = pwd ~ '\0';
+        BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+        if (password is null) {
+            key = PEM_read_bio_PrivateKey(bio, null, null, null);
+        } else {
+            ubyte[] pwd = cast(ubyte[])password;
+            pwd = pwd ~ '\0';
 
-                key = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
-            }
-            BIO_free_all(bio);
+            key = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
         }
-
-        version(Botan)
-        {
-            import botan.pubkey.pkcs8 : loadKey;
-            auto rng = new AutoSeededRNG();
-            if(password is null || password == "")
-            {
-                auto pk = loadKey(cast(DataSource) DataSourceMemory(privateKey), rng, "");
-                privKey = cast(ECPrivateKey)pk;
-            }
-            else
-            {
-                auto pk = loadKey(cast(DataSource) DataSourceMemory(privateKey), rng, {return password;});
-                privKey = cast(ECPrivateKey)pk;
-            }
-            pubKey = cast(ECPublicKey)privKey;
-        }
+        BIO_free_all(bio);
     }
 
     public this(string publicKey)
     {
-        version(OpenSSL)
-        {
-            //Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
-            ubyte[] seedbuf = random(32);
-            RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
+        //Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
+        ubyte[] seedbuf = random(32);
+        RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
 
-            _hasPrivateKey = false;
-            ubyte[] pk = cast(ubyte[])publicKey;
+        _hasPrivateKey = false;
+        ubyte[] pk = cast(ubyte[])publicKey;
 
-            BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-            key = PEM_read_bio_PUBKEY(bio, null, null, null);
-            BIO_free_all(bio);
-        }
-
-        version(Botan)
-        {
-            import botan.pubkey.x509_key : loadKey;
-            auto pk = loadKey(cast(DataSource) DataSourceMemory(publicKey));
-            pubKey = cast(ECPublicKey)pk;
-        }
+        BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+        key = PEM_read_bio_PUBKEY(bio, null, null, null);
+        BIO_free_all(bio);
     }
 
     public ~this()
     {
-        version(OpenSSL)
-        {
-            if (key !is null)
-                EVP_PKEY_free(key);
-            if (keyctx !is null)
-                EVP_PKEY_CTX_free(keyctx);
-            if (params !is null)
-                EVP_PKEY_free(params);
-            if (paramsctx !is null)
-                EVP_PKEY_CTX_free(paramsctx);
+        if (key !is null) {
+            EVP_PKEY_free(key);
+        }
+        if (keyctx !is null) {
+            EVP_PKEY_CTX_free(keyctx);
+        }
+        if (params !is null) {
+            EVP_PKEY_free(params);
+        }
+        if (paramsctx !is null) {
+            EVP_PKEY_CTX_free(paramsctx);
         }
     }
 
     public ubyte[] derive(string peerKey)
     {
-        version(OpenSSL)
-        {
-            ubyte[] pk = cast(ubyte[])peerKey;
-            BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-            EVP_PKEY* peer = PEM_read_bio_PUBKEY(bio, null, null, null);
-            BIO_free_all(bio);
+        ubyte[] pk = cast(ubyte[])peerKey;
+        BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+        EVP_PKEY* peer = PEM_read_bio_PUBKEY(bio, null, null, null);
+        BIO_free_all(bio);
 
-            //Initialize the key derivation context.
-            EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(key, null);
-            if (ctx is null)
-                throw new CryptographicException("Unable to create the key derivation context.");
-            if (EVP_PKEY_derive_init(ctx) <= 0)
-                throw new CryptographicException("Unable to initialize the key derivation context.");
-            if (EVP_PKEY_derive_set_peer(ctx, peer) <= 0)
-                throw new CryptographicException("Unable to set the peer key.");
-
-            //Derive the key
-            size_t dklen = 0;
-            if (EVP_PKEY_derive(ctx, null, &dklen) <= 0)
-                throw new CryptographicException("Unable to determine the length of the derived key.");
-            ubyte[] derivedKey = new ubyte[dklen];
-            if (EVP_PKEY_derive(ctx, derivedKey.ptr, &dklen) <= 0)
-                throw new CryptographicException("Unable to determine the length of the derived key.");
-
-            return derivedKey;
+        //Initialize the key derivation context.
+        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(key, null);
+        if (ctx is null) {
+            throw new CryptographicException("Unable to create the key derivation context.");
+        }
+        if (EVP_PKEY_derive_init(ctx) <= 0) {
+            throw new CryptographicException("Unable to initialize the key derivation context.");
+        }
+        if (EVP_PKEY_derive_set_peer(ctx, peer) <= 0) {
+            throw new CryptographicException("Unable to set the peer key.");
         }
 
-        version(Botan)
-        {
-            if(privKey is null)
-                throw new CryptographicException("Key derivation requires a private key.");
-
-            //Import the peer key
-            import botan.pubkey.x509_key : loadKey;
-            auto pk = cast(ECDHPublicKey)loadKey(cast(DataSource) DataSourceMemory(peerKey));
-
-            //Derive the key
-            auto rng = new AutoSeededRNG();
-            auto keyAgreement = new PKKeyAgreement(privKey, "KDF2(SHA-384)");
-            auto key = keyAgreement.deriveKey(48, pk.publicValue).bitsOf();
-
-            ubyte[] output = new ubyte[key.length];
-            for(int i=0; i<key.length; i++)
-                output[i]=key[i];
-            return output;
+        //Derive the key
+        size_t dklen = 0;
+        if (EVP_PKEY_derive(ctx, null, &dklen) <= 0) {
+            throw new CryptographicException("Unable to determine the length of the derived key.");
         }
+        ubyte[] derivedKey = new ubyte[dklen];
+        if (EVP_PKEY_derive(ctx, derivedKey.ptr, &dklen) <= 0) {
+            throw new CryptographicException("Unable to determine the length of the derived key.");
+        }
+
+        return derivedKey;
     }
 
     public ubyte[] sign(ubyte[] data, bool useSha256 = false)
     {
-        version(OpenSSL)
-        {
-            EVP_PKEY_CTX* pkeyctx = null;
+        EVP_PKEY_CTX* pkeyctx = null;
 
-            pkeyctx = EVP_PKEY_CTX_new(key, null);
-            if (pkeyctx is null)
-                throw new CryptographicException("Unable to create the key signing context.");
-            scope(exit)
-            {
-                if (pkeyctx !is null)
-                    EVP_PKEY_CTX_free(pkeyctx);
+        pkeyctx = EVP_PKEY_CTX_new(key, null);
+        if (pkeyctx is null) {
+            throw new CryptographicException("Unable to create the key signing context.");
+        }
+        scope(exit) {
+            if (pkeyctx !is null) {
+                EVP_PKEY_CTX_free(pkeyctx);
             }
-
-            if (EVP_PKEY_sign_init(pkeyctx) <= 0)
-                throw new CryptographicException("Unable to initialize the signing digest.");
-
-            if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
-                throw new CryptographicException("Unable to set the signing digest.");
-
-            size_t signlen = 0;
-            if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0)
-                throw new CryptographicException("Unable to calculate signature length.");
-
-            ubyte[] sign = new ubyte[signlen];
-            if (EVP_PKEY_sign(pkeyctx, sign.ptr, &signlen, data.ptr, data.length) <= 0)
-                throw new CryptographicException("Unable to calculate signature.");
-
-            return sign;
         }
 
-        version(Botan)
-        {
-            auto rng = new AutoSeededRNG();
-            auto signer = new PKSigner(privKey, !useSha256 ? "EMSA1(SHA-384)" : "EMSA1(SHA-256)");
-            auto sig = signer.signMessage(data.ptr, data.length, rng);
-
-            ubyte[] output = new ubyte[sig.length];
-            for(int i=0; i<sig.length; i++)
-                output[i]=sig[i];
-            return output;
+        if (EVP_PKEY_sign_init(pkeyctx) <= 0) {
+            throw new CryptographicException("Unable to initialize the signing digest.");
         }
+
+        if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0) {
+            throw new CryptographicException("Unable to set the signing digest.");
+        }
+
+        size_t signlen = 0;
+        if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0) {
+            throw new CryptographicException("Unable to calculate signature length.");
+        }
+
+        ubyte[] sign = new ubyte[signlen];
+        if (EVP_PKEY_sign(pkeyctx, sign.ptr, &signlen, data.ptr, data.length) <= 0) {
+            throw new CryptographicException("Unable to calculate signature.");
+        }
+
+        return sign;
     }
 
     public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
     {
-        version(OpenSSL)
-        {
-            EVP_PKEY_CTX* pkeyctx = null;
+        EVP_PKEY_CTX* pkeyctx = null;
 
-            pkeyctx = EVP_PKEY_CTX_new(key, null);
-            if (pkeyctx is null)
-                throw new CryptographicException("Unable to create the key signing context.");
-            scope(exit)
-            {
-                if (pkeyctx !is null)
-                    EVP_PKEY_CTX_free(pkeyctx);
+        pkeyctx = EVP_PKEY_CTX_new(key, null);
+        if (pkeyctx is null) {
+            throw new CryptographicException("Unable to create the key signing context.");
+        }
+        scope(exit) {
+            if (pkeyctx !is null) {
+                EVP_PKEY_CTX_free(pkeyctx);
             }
-
-            if (EVP_PKEY_verify_init(pkeyctx) <= 0)
-                throw new CryptographicException("Unable to initialize the signing digest.");
-
-            if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0)
-                throw new CryptographicException("Unable to set the signing digest.");
-
-            int ret = EVP_PKEY_verify(pkeyctx, data.ptr, cast(long)data.length, signature.ptr, cast(long)signature.length);
-
-            return ret != 1;
         }
 
-        version(Botan)
-        {
-            auto rng = new AutoSeededRNG();
-            auto verifier = new PKVerifier(pubKey, !useSha256 ? "EMSA1(SHA-384)" : "EMSA1(SHA-256)");
-            return verifier.verifyMessage(data.ptr, data.length, signature.ptr, signature.length);
+        if (EVP_PKEY_verify_init(pkeyctx) <= 0) {
+            throw new CryptographicException("Unable to initialize the signing digest.");
         }
+
+        if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0) {
+            throw new CryptographicException("Unable to set the signing digest.");
+        }
+
+        int ret = EVP_PKEY_verify(pkeyctx, data.ptr, cast(long)data.length, signature.ptr, cast(long)signature.length);
+
+        return ret != 1;
     }
 
     public string getPublicKey()
     {
-        version(OpenSSL)
-        {
-            BIO* bio = BIO_new(BIO_s_mem());
+        BIO* bio = BIO_new(BIO_s_mem());
 
-            PEM_write_bio_PUBKEY(bio, key);
+        PEM_write_bio_PUBKEY(bio, key);
 
-            ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
-            BIO_read(bio, buffer.ptr, cast(int)buffer.length);
-            BIO_free_all(bio);
+        ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
+        BIO_read(bio, buffer.ptr, cast(int)buffer.length);
+        BIO_free_all(bio);
 
-            return cast(string)buffer;
-        }
-
-        version(Botan)
-        {
-            import botan.pubkey.x509_key : PEM_encode;
-            import botan.pubkey.x509_key : BER_encode;
-
-            writeln("Extracting Public Key in BER.");
-            auto ber = BER_encode(pubKey);
-            writeln("Extracting Public Key in PEM.");
-            auto pem = PEM_encode(pubKey);
-            writeln(pem);
-            return pem;
-        }
+        return cast(string)buffer;
     }
 
     public string getPrivateKey(string password, bool use3Des = false)
     {
-        if (!_hasPrivateKey)
+        if (!_hasPrivateKey) {
             return null;
-
-        version(OpenSSL)
-        {
-            BIO* bio = BIO_new(BIO_s_mem());
-
-            if (password is null)
-                PEM_write_bio_PKCS8PrivateKey(bio, key, null, null, 0, null, null);
-            else
-            {
-                ubyte[] pwd = cast(ubyte[])password;
-                pwd = pwd ~ '\0';
-
-                PEM_write_bio_PKCS8PrivateKey(
-                    bio,
-                    key,
-                    !use3Des ? EVP_aes_256_cbc() : EVP_des_ede3_cbc(),
-                    null,
-                    0,
-                    null,
-                    pwd.ptr);
-            }
-
-            if(BIO_ctrl_pending(bio) == 0)
-                throw new CryptographicException("No private key written.");
-
-            ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
-            BIO_read(bio, buffer.ptr, cast(int)buffer.length);
-            BIO_free_all(bio);
-
-            return cast(string)buffer;
         }
 
-        version(Botan)
-        {
-            import botan.pubkey.pkcs8 : PEM_encode;
-            if (password is null || password == "")
-            {
-                writeln("Private Key With Password:");
-                return PEM_encode(privKey);
-            }
-            else
-            {
-                auto rng = new AutoSeededRNG();
-                return PEM_encode(privKey, rng, password, 300.msecs, !use3Des ? "AES-256/CBC" : "TripleDES/CBC");
-            }
+        BIO* bio = BIO_new(BIO_s_mem());
+
+        if (password is null) {
+            PEM_write_bio_PKCS8PrivateKey(bio, key, null, null, 0, null, null);
+        } else {
+            ubyte[] pwd = cast(ubyte[])password;
+            pwd = pwd ~ '\0';
+
+            PEM_write_bio_PKCS8PrivateKey(
+                bio,
+                key,
+                !use3Des ? EVP_aes_256_cbc() : EVP_des_ede3_cbc(),
+                null,
+                0,
+                null,
+                pwd.ptr);
         }
+
+        if(BIO_ctrl_pending(bio) == 0) {
+            throw new CryptographicException("No private key written.");
+        }
+
+        ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
+        BIO_read(bio, buffer.ptr, cast(int)buffer.length);
+        BIO_free_all(bio);
+
+        return cast(string)buffer;
     }
 }
 
@@ -472,7 +346,6 @@ unittest
     assert(eckey.verify(data, sig));
 }
 
-version(OpenSSL) {
 private int getOpenSSLCurveId(EccCurve curve) {
     import std.conv;
     import std.format;
@@ -484,20 +357,4 @@ private int getOpenSSLCurveId(EccCurve curve) {
         default:
             throw new CryptographicException(format("ECC Curve '%s' not supported.", to!string(curve)));
     }
-}
-}
-
-version(Botan) {
-private string getBotanCurveId(EccCurve curve) {
-    import std.conv;
-    import std.format;
-
-    switch (curve) {
-        case EccCurve.P256: return "secp256k1";
-        case EccCurve.P384: return "secp384r1";
-        case EccCurve.P521: return "secp521r1";
-        default:
-            throw new CryptographicException(format("ECC Curve '%s' not supported.", to!string(curve)));
-    }
-}
 }

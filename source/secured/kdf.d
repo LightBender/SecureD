@@ -3,20 +3,8 @@ module secured.kdf;
 import std.typecons;
 import std.format;
 
-version(OpenSSL)
-{
 import deimos.openssl.evp;
 import secured.openssl;
-}
-
-version(Botan)
-{
-import botan.hash.sha2_32;
-import botan.hash.sha2_64;
-import botan.mac.hmac;
-import botan.pbkdf.pbkdf2;
-import core.time;
-}
 
 import secured.hash;
 import secured.random;
@@ -48,28 +36,11 @@ public struct KdfResult {
         throw new CryptographicException(format("The PBKDF2 output length must be less than or equal to %s bytes in length.", getHashLength(func)));
     }
 
-    version(OpenSSL)
-    {
-        ubyte[] output = new ubyte[outputLen];
-        if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, salt.ptr, cast(int)salt.length, iterations, getOpenSSLHashAlgorithm(func), outputLen, output.ptr) == 0) {
-            throw new CryptographicException("Unable to execute PBKDF2 hash function.");
-        }
-        return output;
+    ubyte[] output = new ubyte[outputLen];
+    if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, salt.ptr, cast(int)salt.length, iterations, getOpenSSLHashAlgorithm(func), outputLen, output.ptr) == 0) {
+        throw new CryptographicException("Unable to execute PBKDF2 hash function.");
     }
-
-    version(Botan)
-    {
-        auto kdf = new PKCS5_PBKDF2(new HMAC(getBotanHashAlgorithm(func)));
-        auto result = kdf.keyDerivation(cast(ulong)outputLen, cast(const(string))password, salt.ptr, salt.length, cast(ulong)iterations, Duration.zero);
-        auto octet = result.second();
-
-        ubyte[] output = new ubyte[octet.length()];
-        ubyte* octetptr = octet.ptr();
-        for(int i = 0; i < octet.length(); i++) {
-            output[i] = octetptr[i];
-        }
-        return output;
-    }
+    return output;
 }
 
 @safe public bool pbkdf2_verify_ex(ubyte[] test, string password, ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
@@ -191,56 +162,39 @@ unittest
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
 
-    version(OpenSSL)
-    {
-        EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, null);
-        scope(exit) {
-            if(pctx !is null) {
-                EVP_PKEY_CTX_free(pctx);
-            }
+    EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, null);
+    scope(exit) {
+        if(pctx !is null) {
+            EVP_PKEY_CTX_free(pctx);
         }
-
-        if (EVP_PKEY_derive_init(pctx) <= 0) {
-            throw new CryptographicException("Unable to create HKDF function.");
-        }
-        
-        if (EVP_PKEY_CTX_set_hkdf_md(pctx, getOpenSSLHashAlgorithm(func)) <= 0) {
-            throw new CryptographicException("Unable to create HKDF hash function.");
-        }
-
-        if (salt.length != 0 && EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt) <= 0) {
-            throw new CryptographicException("Unable to set HKDF salt.");
-        }
-
-        if (info.length != 0 && EVP_PKEY_CTX_add1_hkdf_info(pctx, info) <= 0) {
-            throw new CryptographicException("Unable to set HKDF info.");
-        }
-
-        if (EVP_PKEY_CTX_set1_hkdf_key(pctx, key) <= 0) {
-            throw new CryptographicException("Unable to set HKDF key.");
-        }
-
-        ubyte[] keyMaterial = new ubyte[outputLen];
-        if (EVP_PKEY_derive(pctx, keyMaterial.ptr, &outputLen) <= 0) {
-            throw new CryptographicException("Unable to generate the requested key material.");
-        }
-
-        return keyMaterial;
     }
 
-    version(Botan)
-    {
-        auto hkdf = HKDF(new HMAC(getBotanHashAlgorithm(func)), new HMAC(getBotanHashAlgorithm(func)));
-        
-        hkdf.startExtract(salt.ptr, salt.length);
-        hkdf.extract(key.ptr, key.length);
-        hkdf.finishExtract();
-        
-        byte[] infoBytes = cast(ubyte[])info;
-        SecureVector!ubyte result = SecureVector!ubyte(outputLen);
-        hkdf.expand(result.ptr, result.length, infoBytes.ptr, infoBytes.length);
-        return result;
+    if (EVP_PKEY_derive_init(pctx) <= 0) {
+        throw new CryptographicException("Unable to create HKDF function.");
     }
+    
+    if (EVP_PKEY_CTX_set_hkdf_md(pctx, getOpenSSLHashAlgorithm(func)) <= 0) {
+        throw new CryptographicException("Unable to create HKDF hash function.");
+    }
+
+    if (salt.length != 0 && EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt) <= 0) {
+        throw new CryptographicException("Unable to set HKDF salt.");
+    }
+
+    if (info.length != 0 && EVP_PKEY_CTX_add1_hkdf_info(pctx, info) <= 0) {
+        throw new CryptographicException("Unable to set HKDF info.");
+    }
+
+    if (EVP_PKEY_CTX_set1_hkdf_key(pctx, key) <= 0) {
+        throw new CryptographicException("Unable to set HKDF key.");
+    }
+
+    ubyte[] keyMaterial = new ubyte[outputLen];
+    if (EVP_PKEY_derive(pctx, keyMaterial.ptr, &outputLen) <= 0) {
+        throw new CryptographicException("Unable to generate the requested key material.");
+    }
+
+    return keyMaterial;
 }
 
 unittest
