@@ -38,7 +38,7 @@ Algorithms
 - Symmetric:
   - Algorithms: AES (128/192/256)
   - Modes: CTR, CBC (PKCS7 Padding)
-- KDF:              PBKDF2, HKDF
+- KDF:              PBKDF2, HKDF, SCrypt
 - Asymmetric:       ECC: Curve25519 (Default) P256, P384, P521 (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
 - Asymmetric:       RSA-AES-256-CTR Seal/Open, RSA only Encrypt/Decrypt and RSA only Sign/Verify
 - RNG:              System RNG on POSIX and Windows
