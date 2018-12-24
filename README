@@ -4,10 +4,10 @@ SecureD is a cryptography library for D that is designed to make working with cr
 
 Design Philosophy
 
-- SecureD does not present a menu of options by design. This is because the dizzying array of options presented to developers by other cryptography libraries creates confusion about what they should actually be using 95% of the time. SecureD presents only the choices that should be used in 95% of implementations.
+- SecureD does not present a menu of options by default. This is because the dizzying array of options presented to developers by other cryptography libraries creates confusion about what they should actually be using 95% of the time. SecureD presents sensible defaults that should be used in 95% of implementations. However, a selection of options is available under the extended API's should a situation arise where such flexibility is required.
 - SecureD reserves the right to change which algorithms and defaults it presents should significant weaknesses be found. If such change is required, this will trigger an increase of the major version number.
 - SecureD takes a situational approach to it's construction. Identify a situation then apply best practices to implement with a solution. Situations that SecureD supports are:
-  - Data Hashes
+  - Data Integrity
   - Data Storage
   - Message Authentication
   - Key Derivation (Both PKI and KDF based)
@@ -22,7 +22,7 @@ Safe by Design:
 Use only safe algorithms with safe modes. Make conservative choices in the implementation.
 
 Do no Reimplement Cryptography Algorithms:
-Use industry standard libraries instead. SecureD is based on OpenSSL and, optionally, Botan.
+Use industry standard libraries instead. SecureD is based on OpenSSL. Botan support was removed in V2 of SecureD due to the extensiveness of the rewrite that SecureD underwent. If someone is willing to update with new implementations they will be considered for inclusion.
 
 Minimal Code:
 Keep the code to a minimum. This ensures high-maintainability and facilitates understanding of the code.
@@ -36,8 +36,9 @@ Algorithms
   - SHA2: 224, 256, 384, 512, 512/224, 512/256
   - SHA3: 224, 256, 384, 512
 - Symmetric:
-  - Algorithms: AES (128/192/256)
-  - Modes: GCM, CCM, CTR, OFB, CFB, CBC (PKCS7 Padding)
+  - Algorithms: AES (128/192/256), ChaCha20
+  - Stream Modes: GCM, CTR, Poly1305 (ChaCha20 only)
+  - Block Modes: OFB, CFB, CBC (PKCS7 Padding Only)
 - KDF:              PBKDF2, HKDF, SCrypt
 - Asymmetric:       ECC: P256, P384, P521 (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
 - Asymmetric:       RSA-AES Seal/Open, RSA Encrypt/Decrypt, and RSA Sign/Verify

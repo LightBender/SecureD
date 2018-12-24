@@ -27,7 +27,7 @@ public struct KdfResult {
     return constantTimeEquality(test.key, key);
 }
 
-@trusted public ubyte[] pbkdf2_ex(string password, ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations)
+@trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations)
 {
     if (salt.length != getHashLength(func)) {
         throw new CryptographicException(format("The PBKDF2 salt must be %s bytes in length.", getHashLength(func)));
@@ -43,7 +43,7 @@ public struct KdfResult {
     return output;
 }
 
-@safe public bool pbkdf2_verify_ex(ubyte[] test, string password, ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
+@safe public bool pbkdf2_verify_ex(const ubyte[] test, string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
     ubyte[] key = pbkdf2_ex(password, salt, func, outputLen, iterations);
     return constantTimeEquality(test, key);
 }
@@ -150,14 +150,14 @@ unittest
     assert(toHexString!(LetterCase.lower)(vec3) == "d1aacafea3a9fdf3ee6236b1b45527974ea01539b4a7cc493bba56e15e14d520");
 }
 
-@safe public KdfResult hkdf(ubyte[] key, ulong outputLen) {
+@safe public KdfResult hkdf(const ubyte[] key, ulong outputLen) {
     KdfResult result;
     result.salt = random(getHashLength(HashAlgorithm.SHA2_384));
     result.key = hkdf_ex(key, result.salt, string.init, outputLen, HashAlgorithm.SHA2_384);
     return result;
 }
 
-@trusted public ubyte[] hkdf_ex(ubyte[] key, ubyte[] salt, string info, ulong outputLen, HashAlgorithm func) {
+@trusted public ubyte[] hkdf_ex(const ubyte[] key, const ubyte[] salt, string info, ulong outputLen, HashAlgorithm func) {
     if (key.length == 0) {
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
@@ -225,19 +225,19 @@ unittest
     return result;
 }
 
-@safe public KdfResult scrypt(ubyte[] password) {
+@safe public KdfResult scrypt(const ubyte[] password) {
     KdfResult result;
     result.salt = random(32);
     result.key = scrypt_ex(password, result.salt, 1_048_576, 8, 1, 1_074_790_400, 64);
     return result;
 }
 
-@trusted public ubyte[] scrypt_ex(string password, ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, ulong length) {
+@trusted public ubyte[] scrypt_ex(string password, const ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, ulong length) {
     import std.string;
     return scrypt_ex(cast(ubyte[])password.representation, salt, n, r, p, maxMemory, length);
 }
 
-@trusted public ubyte[] scrypt_ex(ubyte[] password, ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, ulong length) {
+@trusted public ubyte[] scrypt_ex(const ubyte[] password, const ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, ulong length) {
     ubyte[] hash = new ubyte[length];
 
     if (EVP_PBE_scrypt((cast(char[])password).ptr, password.length, salt.ptr, salt.length, n, r, p, maxMemory, hash.ptr, length) <= 0) {

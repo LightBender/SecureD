@@ -10,7 +10,7 @@ public enum uint FILE_BUFFER_SIZE = 32768;
     }
 }
 
-@safe pure public bool constantTimeEquality(ubyte[] a, ubyte[] b)
+@safe pure public bool constantTimeEquality(const ubyte[] a, const ubyte[] b)
 {
     if(a.length != b.length)
         return false;

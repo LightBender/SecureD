@@ -21,7 +21,7 @@ public enum HashAlgorithm : ubyte {
     SHA3_512,
 }
 
-@safe public ubyte[] hash(ubyte[] data) {
+@safe public ubyte[] hash(const ubyte[] data) {
     return hash_ex(data, HashAlgorithm.SHA2_384);
 }
 
@@ -30,7 +30,7 @@ public enum HashAlgorithm : ubyte {
     return constantTimeEquality(hash, test);
 }
 
-@trusted public ubyte[] hash_ex(ubyte[] data, HashAlgorithm func)
+@trusted public ubyte[] hash_ex(const ubyte[] data, HashAlgorithm func)
 {
     //Create the OpenSSL context
     EVP_MD_CTX *mdctx;
@@ -63,7 +63,7 @@ public enum HashAlgorithm : ubyte {
     return digest;
 }
 
-@safe public bool hash_verify_ex(ubyte[] test, ubyte[] data, HashAlgorithm func) {
+@safe public bool hash_verify_ex(const ubyte[] test, const ubyte[] data, HashAlgorithm func) {
     ubyte[] hash = hash_ex(data, func);
     return constantTimeEquality(hash, test);
 }
@@ -177,11 +177,12 @@ unittest {
     }
 }
 
-@safe package int getHashLength(HashAlgorithm func) {
+@safe package uint getHashLength(HashAlgorithm func) {
     import std.conv;
     import std.format;
 
     switch (func) {
+        case HashAlgorithm.None: return 0;
         case HashAlgorithm.SHA2_224: return 24;
         case HashAlgorithm.SHA2_256: return 32;
         case HashAlgorithm.SHA2_384: return 48;

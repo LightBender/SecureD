@@ -31,20 +31,26 @@ void EVP_MD_CTX_free(EVP_MD_CTX* free);
 void EVP_MD_CIPHER_free(EVP_CIPHER_CTX* free);
 int EVP_PBE_scrypt(const char *pass, size_t passlen, const ubyte *salt, size_t saltlen, ulong N, ulong r, ulong p, ulong maxmem, ubyte *key, size_t keylen);
 
+const(EVP_CIPHER)* EVP_chacha20();
+const(EVP_CIPHER)* EVP_chacha20_poly1305();
+
 extern(D):
 
 enum int EVP_PKEY_HKDF = 1036;
 enum int EVP_PKEY_SCRYPT = 973;
+enum int EVP_CTRL_AEAD_SET_IVLEN = 0x9;
+enum int EVP_CTRL_AEAD_GET_TAG = 0x10;
+enum int EVP_CTRL_AEAD_SET_TAG = 0x11;
 
 int EVP_PKEY_CTX_set_hkdf_md(EVP_PKEY_CTX *pctx, const EVP_MD *md) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MD, 0, cast(void *)(md));
 }
 
-int EVP_PKEY_CTX_set1_hkdf_salt(EVP_PKEY_CTX *pctx, ubyte[] salt) {
+int EVP_PKEY_CTX_set1_hkdf_salt(EVP_PKEY_CTX *pctx, const ubyte[] salt) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_SALT, cast(int)salt.length, cast(void *)salt.ptr);
 }
 
-int EVP_PKEY_CTX_set1_hkdf_key(EVP_PKEY_CTX *pctx, ubyte[] key) {
+int EVP_PKEY_CTX_set1_hkdf_key(EVP_PKEY_CTX *pctx, const ubyte[] key) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_KEY, cast(int)key.length, cast(void *)key.ptr);
 }
 
@@ -52,11 +58,11 @@ int EVP_PKEY_CTX_add1_hkdf_info(EVP_PKEY_CTX *pctx, string info) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_INFO, cast(int)(cast(ubyte[])info).length, cast(void *)info);
 }
 
-int EVP_PKEY_CTX_set1_pbe_pass(EVP_PKEY_CTX *pctx, ubyte[] password) {
+int EVP_PKEY_CTX_set1_pbe_pass(EVP_PKEY_CTX *pctx, const ubyte[] password) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_PASS, cast(int)password.length, cast(void *)(password));
 }
 
-int EVP_PKEY_CTX_set1_scrypt_salt(EVP_PKEY_CTX *pctx, ubyte[] salt) {
+int EVP_PKEY_CTX_set1_scrypt_salt(EVP_PKEY_CTX *pctx, const ubyte[] salt) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_SCRYPT_SALT, cast(int)salt.length, cast(void *)(salt));
 }
 

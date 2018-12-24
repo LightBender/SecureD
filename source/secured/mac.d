@@ -9,16 +9,16 @@ import secured.hash;
 import secured.util;
 
 
-@safe public ubyte[] hmac(ubyte[] key, ubyte[] data) {
+@safe public ubyte[] hmac(const ubyte[] key, const ubyte[] data) {
     return hmac_ex(key, data, HashAlgorithm.SHA2_384);
 }
 
-@safe public bool hmac_verify(ubyte[] test, ubyte[] key, ubyte[] data) {
+@safe public bool hmac_verify(const ubyte[] test, const ubyte[] key, const ubyte[] data) {
     ubyte[] hash = hmac_ex(key, data, HashAlgorithm.SHA2_384);
     return constantTimeEquality(test, hash);
 }
 
-@trusted public ubyte[] hmac_ex(ubyte[] key, ubyte[] data, HashAlgorithm func)
+@trusted public ubyte[] hmac_ex(const ubyte[] key, const ubyte[] data, HashAlgorithm func)
 {
     if (key.length > getHashLength(func)) {
         throw new CryptographicException(format("HMAC key must be less than or equal to %s bytes in length.", getHashLength(func)));
@@ -67,7 +67,7 @@ import secured.util;
     return digest;
 }
 
-@safe public bool hmac_verify_ex(ubyte[] test, ubyte[] key, ubyte[] data, HashAlgorithm func){
+@safe public bool hmac_verify_ex(const ubyte[] test, const ubyte[] key, const ubyte[] data, HashAlgorithm func){
     ubyte[] hash = hmac_ex(key, data, func);
     return constantTimeEquality(test, hash);
 }
