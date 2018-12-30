@@ -7,10 +7,10 @@ d:
 
 script:
     - wget https://www.openssl.org/source/openssl-1.1.1a.tar.gz
-    - tar xzvf openssl-1.1.1a.tar.gz
+    - tar xzvf openssl-1.1.1a.tar.gz >/dev/null
     - cd openssl-1.1.1a
-    - ./config -Wl,--enable-new-dtags,-rpath,'$(LIBRPATH)'
-    - make
+    - ./config -Wl,--enable-new-dtags,-rpath,'$(LIBRPATH)' >/dev/null
+    - make >/dev/null
     - sudo make install
     - openssl version -a
     - cd ../

@@ -173,7 +173,7 @@ private struct CryptoBlock {
     }
 }
 
-@safe public ubyte[] encrypt(const ubyte[] key, const ubyte[] data, const ubyte[] additional = null) {
+@safe public ubyte[] encrypt(const ubyte[] key, const ubyte[] data, const ubyte[] additional) {
     return encrypt_ex(key, data, additional, defaultChunkSize, SymmetricAlgorithm.Default, KdfAlgorithm.Default, defaultKdfIterations, defaultSCryptR, defaultSCryptP, HashAlgorithm.SHA2_384);
 }
 
@@ -462,7 +462,7 @@ unittest
                                 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
     writeln("Testing Encryption (No Additional Data)");
-    ubyte[] enc = encrypt(key, cast(ubyte[])input);
+    ubyte[] enc = encrypt(key, cast(ubyte[])input, null);
     writeln("Encryption Input: ", input);
     writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
 
