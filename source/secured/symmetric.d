@@ -105,7 +105,6 @@ private struct CryptoBlock {
     }
 
     @trusted public this(const ubyte[] data) {
-        import std.stdio;
         import std.bitmanip : read;
         ubyte[] bytes = cast(ubyte[])data;
 
@@ -128,14 +127,6 @@ private struct CryptoBlock {
         const uint saltLen = getHashLength(this.hash);
         const uint ivLen = getCipherIVLength(this.symmetric);
         const uint authLen = getAuthLength(this.symmetric, this.hash);
-
-        writeln("Salt Length: ", saltLen);
-        writeln("IV Length: ", ivLen);
-        writeln("Auth Length: ", authLen);
-        writeln("AAD Length: ", additionalLength);
-        writeln("Encrypted Length: ", encryptedLength);
-        writeln("Total Length: ", (saltLen + ivLen + authLen + additionalLength + encryptedLength));
-        writeln("Data Length: ", data.length);
 
         this.salt = cast(immutable)bytes[0..saltLen];
         bytes = bytes[saltLen..$];
@@ -192,7 +183,7 @@ private struct CryptoBlock {
     const ushort chunks = to!ushort(floor(tcc)+1);
 
     //Get Derived Key
-    KdfResult derivedKey = deriveKey(key, symmetric, kdf, n, r, p, hash);
+    KdfResult derivedKey = deriveKey(key, null, symmetric, kdf, n, r, p, hash);
 
     CryptoBlock[] blocks;
     ulong processed = 0;
@@ -280,11 +271,11 @@ private struct CryptoBlock {
     return CryptographicResult(output[0..written], auth);
 }
 
-@trusted public ubyte[] decrypt(const ubyte[] key, const ubyte[] data) {
+@trusted public ubyte[] decrypt(const ubyte[] key, const ubyte[] data, out ubyte[] additional) {
     //Get Derived Key
     CryptoBlock block = CryptoBlock(data);
     const ushort totalSections = block.sectionCount;
-    KdfResult derivedKey = deriveKey(key, block.symmetric, block.kdf, block.kdfIterations, block.scryptMemory, block.scryptParallelism, block.hash);
+    KdfResult derivedKey = deriveKey(key, block.salt, block.symmetric, block.kdf, block.kdfIterations, block.scryptMemory, block.scryptParallelism, block.hash);
 
     OutBuffer buffer = new OutBuffer();
     for(ushort i = 0; i < totalSections; i++) {
@@ -298,6 +289,7 @@ private struct CryptoBlock {
         buffer.write(result);
     }
 
+    additional = cast(ubyte[])block.additional;
     return buffer.toBytes();
 }
 
@@ -314,26 +306,26 @@ private struct CryptoBlock {
     }
 
     //Initialize the cipher context
-    if (EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, null, null) != 1) {
+    if (!EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, null, null)) {
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
     //Initialize the AEAD context
     if (isAeadCipher(algorithm)) {
-        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, cast(int)iv.length, null) != 1) {
+        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, cast(int)iv.length, null)) {
             throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
         }
     }
 
     //Set the Key and IV
-    if (EVP_DecryptInit_ex(ctx, null, null, key.ptr, iv.ptr) != 1) {
+    if (!EVP_DecryptInit_ex(ctx, null, null, key.ptr, iv.ptr)) {
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
     //Write the additional data to the cipher context, if any
-    if (additional !is null && isAeadCipher(algorithm)) {
+    if (additional.length != 0 && isAeadCipher(algorithm)) {
         int aadLen = 0;
-        if (EVP_DecryptUpdate(ctx, null, &aadLen, additional.ptr, cast(int)additional.length) != 1) {
+        if (!EVP_DecryptUpdate(ctx, null, &aadLen, additional.ptr, cast(int)additional.length)) {
             throw new CryptographicException("Unable to write bytes to cipher context.");
         }
     }
@@ -342,20 +334,20 @@ private struct CryptoBlock {
     int written = 0;
     int len = 0;
     ubyte[] output = new ubyte[data.length];
-    if (EVP_DecryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length) != 1) {
+    if (!EVP_DecryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length)) {
         throw new CryptographicException("Unable to write bytes to cipher context.");
     }
     written += len;
 
     //Use the supplied tag to verify the message
     if (isAeadCipher(algorithm)) {
-        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)auth.length, (cast(ubyte[])auth).ptr) != 1) {
+        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)auth.length, (cast(ubyte[])auth).ptr)) {
             throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
         }
     }
 
     //Extract the complete plaintext
-    if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) != 1) {
+    if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) <= 0) {
         throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
     }
     written += len;
@@ -363,24 +355,25 @@ private struct CryptoBlock {
     return output[0..written];
 }
 
-@safe private KdfResult deriveKey(const ubyte[] key, SymmetricAlgorithm symmetric, KdfAlgorithm kdf, uint n, ushort r, ushort p, HashAlgorithm hash) {
+@trusted private KdfResult deriveKey(const ubyte[] key, const ubyte[] salt, SymmetricAlgorithm symmetric, KdfAlgorithm kdf, uint n, ushort r, ushort p, HashAlgorithm hash) {
     ubyte[] derivedKey;
-    ubyte[] salt = random(getHashLength(hash));
+    ubyte[] _salt = salt is null ? random(getHashLength(hash)) : cast(ubyte[])salt;
+
     if (kdf == KdfAlgorithm.PBKDF2) {
-        derivedKey = pbkdf2_ex(to!string(key), salt, hash, getCipherKeyLength(symmetric), n);
+        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, getCipherKeyLength(symmetric), n);
     }
     if (kdf == KdfAlgorithm.PBKDF2_HKDF) {
-        derivedKey = pbkdf2_ex(to!string(key), salt, hash, getCipherKeyLength(symmetric), n);
-        derivedKey = hkdf_ex(derivedKey, salt, string.init, getCipherKeyLength(symmetric), hash);
+        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, getCipherKeyLength(symmetric), n);
+        derivedKey = hkdf_ex(derivedKey, _salt, string.init, getCipherKeyLength(symmetric), hash);
     }
     if (kdf == KdfAlgorithm.SCrypt) {
-        derivedKey = scrypt_ex(key, salt, n, r, p, maxSCryptMemory, getCipherKeyLength(symmetric));
+        derivedKey = scrypt_ex(key, _salt, n, r, p, maxSCryptMemory, getCipherKeyLength(symmetric));
     }
     if (kdf == KdfAlgorithm.SCrypt_HKDF) {
-        derivedKey = scrypt_ex(key, salt, n, r, p, maxSCryptMemory, getCipherKeyLength(symmetric));
-        derivedKey = hkdf_ex(derivedKey, salt, string.init, getCipherKeyLength(symmetric), hash);
+        derivedKey = scrypt_ex(key, _salt, n, r, p, maxSCryptMemory, getCipherKeyLength(symmetric));
+        derivedKey = hkdf_ex(derivedKey, _salt, string.init, getCipherKeyLength(symmetric), hash);
     }
-    return KdfResult(salt, derivedKey);
+    return KdfResult(_salt, derivedKey);
 }
 
 @trusted package const(EVP_CIPHER*) getOpenSslCipher(SymmetricAlgorithm algo) {
@@ -464,21 +457,36 @@ unittest
 {
     import std.digest;
     import std.stdio;
+    immutable string input = "The quick brown fox jumps over the lazy dog.";
+    immutable ubyte[32] key = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+                                0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
     writeln("Testing Encryption (No Additional Data)");
-
-    ubyte[32] key = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
-                      0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
-
-    string input = "The quick brown fox jumps over the lazy dog.";
-    writeln("Encryption Input: ", input);
     ubyte[] enc = encrypt(key, cast(ubyte[])input);
+    writeln("Encryption Input: ", input);
     writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
 
     writeln("Testing Decryption (No Additional Data)");
-    ubyte[] dec = decrypt(key, enc);
+    ubyte[] ad = null;
+    ubyte[] dec = decrypt(key, enc, ad);
     writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
     writeln("Decryption Output: ", cast(string)dec);
 
+    assert(ad.length == 0);
+    assert((cast(string)dec) == input);
+
+    writeln("Testing Encryption (With Additional Data)");
+    enc = encrypt(key, cast(ubyte[])input, cast(ubyte[])input);
+    writeln("Encryption Input: ", input);
+    writeln("Encryption AD: ", input);
+    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
+
+    writeln("Testing Decryption (With Additional Data)");
+    dec = decrypt(key, enc, ad);
+    writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
+    writeln("Decryption AD: ", cast(string)ad);
+    writeln("Decryption Output: ", cast(string)dec);
+
+    assert((cast(string)ad) == input);
     assert((cast(string)dec) == input);
 }
