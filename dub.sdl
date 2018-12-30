@@ -1,0 +1,8 @@
+name "secured"
+description "A cryptography library for D that encourages secure implementations through simple interfaces."
+authors "Adam Wilson" "Adam Williams" "Georgi Dimitrov" "Nathan Sashihara"
+copyright "Copyright © 2016-2018, Adam Wilson"
+license "BSL-1.0"
+dependency "openssl" version="~>1.1.6"
+targetType "library"
+targetPath "bin/"
