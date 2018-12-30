@@ -11,7 +11,8 @@ script:
     - cd openssl-1.1.1a
     - ./config -Wl,--enable-new-dtags,-rpath,'$(LIBRPATH)' >/dev/null
     - make >/dev/null
-    - sudo make install
+    - sudo make install >/dev/null
     - openssl version -a
     - cd ../
-    - dub test --config=library --compiler=$DC
+    - ls -la /usr/local/lib/
+    - LD_LIBRARY_PATH=/usr/local/lib dub test --config=library --compiler=$DC
