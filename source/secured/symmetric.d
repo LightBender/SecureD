@@ -16,7 +16,7 @@ public enum CryptoHeaderVersion = 1;
 public enum uint defaultKdfIterations = 1_048_576;
 public enum ushort defaultSCryptR = 8;
 public enum ushort defaultSCryptP = 1;
-public enum uint defaultChunkSize = 1_073_741_824;
+public enum uint defaultChunkSize = 268_435_456;
 public enum ulong maxSCryptMemory = 4_294_967_296;
 
 public enum KdfAlgorithm : ubyte {
@@ -49,17 +49,15 @@ public enum SymmetricAlgorithm : ubyte {
     Default = AES256_GCM,
 }
 
-public immutable struct CryptographicResult {
-    public immutable ubyte[] data;
-    public immutable ubyte[] auth;
-
-    private this(ubyte[] data, ubyte[] auth) {
-        this.data = cast(immutable)data;
-        this.auth = cast(immutable)auth;
+@safe private ushort getHeaderSize(ubyte headerVersion) {
+    if(headerVersion == 1) {
+        return 28;
+    } else {
+        throw new CryptographicException("Unsupported cryptographic header version.");
     }
 }
 
-private struct CryptoBlock {
+public immutable struct CryptoBlockHeader {
     public immutable ubyte headerVersion;           // The version of the block header
     public immutable SymmetricAlgorithm symmetric;  // The Symmetric algorithm
     public immutable HashAlgorithm hash;            // The Hash algorithm
@@ -68,45 +66,32 @@ private struct CryptoBlock {
     public immutable ushort scryptMemory;           // The amount SCrypt memory to use
     public immutable ushort scryptParallelism;      // The SCrypt parallelism
 
-    public immutable ushort sectionCount;           // The total number of sections
-    public immutable ushort sectionNumber;          // The current section number
-    public immutable uint sectionSize;              // The size of the current section
+    public immutable uint sectionCount;             // The total number of sections
+    public immutable uint sectionNumber;            // The current section number
 
     public immutable uint additionalLength;         // The length of the additional data
-    public immutable uint encryptedLength;          // The length of the encrypted data+
+    public immutable uint encryptedLength;          // The length of the encrypted data
 
-    public immutable ubyte[] salt;
-    public immutable ubyte[] iv;
-    public immutable ubyte[] auth;
-    public immutable ubyte[] additional;
-    public immutable ubyte[] encrypted;
-
-    @trusted public this(SymmetricAlgorithm symAlg, HashAlgorithm hashAlg, KdfAlgorithm kdfAlg,
-        uint n, ushort r, ushort p, ushort sc, ushort sn,
-        const ubyte[] salt, const ubyte[] iv, const ubyte[] auth, const ubyte[] additional, const ubyte[] encrypted) {
+    @safe public this(SymmetricAlgorithm symAlg, HashAlgorithm hashAlg, KdfAlgorithm kdfAlg, 
+        uint iterations, ushort memory, ushort parallelism,
+        uint sectionCount, uint sectionNumber, uint additionalLength, uint encryptedLength)
+    {
         this.headerVersion = 1;
         this.symmetric = symAlg;
         this.hash = hashAlg;
         this.kdf = kdfAlg;
-        this.kdfIterations = n;
-        this.scryptMemory = r;
-        this.scryptParallelism = p;
-        this.sectionCount = sc;
-        this.sectionNumber = sn;
-        this.sectionSize = cast(uint)(salt.length + iv.length + auth.length + additional.length + encrypted.length);
-        this.additionalLength = cast(uint)additional.length;
-        this.encryptedLength = cast(uint)encrypted.length;
-
-        this.salt = cast(immutable)salt;
-        this.iv = cast(immutable)iv;
-        this.auth = cast(immutable)auth;
-        this.additional = cast(immutable)additional;
-        this.encrypted = cast(immutable)encrypted;
+        this.kdfIterations = iterations;
+        this.scryptMemory = memory;
+        this.scryptParallelism = parallelism;
+        this.sectionCount = sectionCount;
+        this.sectionNumber = sectionNumber;
+        this.additionalLength = additionalLength;
+        this.encryptedLength = encryptedLength;
     }
 
-    @trusted public this(const ubyte[] data) {
+    @trusted public this(const ubyte[] header) {
         import std.bitmanip : read;
-        ubyte[] bytes = cast(ubyte[])data;
+        ubyte[] bytes = cast(ubyte[])header;
 
         this.headerVersion = cast(immutable)bytes.read!ubyte();
         this.symmetric = cast(immutable SymmetricAlgorithm)bytes.read!ubyte();
@@ -117,31 +102,26 @@ private struct CryptoBlock {
         this.scryptMemory = cast(immutable)bytes.read!ushort();
         this.scryptParallelism = cast(immutable)bytes.read!ushort();
 
-        this.sectionCount = cast(immutable)bytes.read!ushort();
-        this.sectionNumber = cast(immutable)bytes.read!ushort();
-        this.sectionSize = cast(immutable)bytes.read!uint();
+        this.sectionCount = cast(immutable)bytes.read!uint();
+        this.sectionNumber = cast(immutable)bytes.read!uint();
 
         this.additionalLength = cast(immutable)bytes.read!uint();
         this.encryptedLength = cast(immutable)bytes.read!uint();
+    }
 
+    @safe public @property ulong getBlockLength() {
         const uint saltLen = getHashLength(this.hash);
         const uint ivLen = getCipherIVLength(this.symmetric);
         const uint authLen = getAuthLength(this.symmetric, this.hash);
+        return saltLen + ivLen + authLen + additionalLength + encryptedLength;
+    }
 
-        this.salt = cast(immutable)bytes[0..saltLen];
-        bytes = bytes[saltLen..$];
-        this.iv = cast(immutable)bytes[0..ivLen];
-        bytes = bytes[ivLen..$];
-        this.auth = cast(immutable)bytes[0..authLen];
-        bytes = bytes[authLen..$];
-        this.additional = cast(immutable)bytes[0..additionalLength];
-        bytes = bytes[additionalLength..$];
-        this.encrypted = cast(immutable)bytes[0..encryptedLength];
+    @safe public @property ushort getHeaderLength() {
+        return getHeaderSize(1);
     }
 
     @trusted private ubyte[] toBytes() {
         import std.bitmanip : write;
-
         ubyte[] header = new ubyte[28];
         
         header[0] = this.headerVersion;
@@ -154,15 +134,60 @@ private struct CryptoBlock {
         header.write(this.scryptParallelism, 10);
 
         header.write(this.sectionCount, 12);
-        header.write(this.sectionNumber, 14);
-        header.write(this.sectionSize, 16);
+        header.write(this.sectionNumber, 16);
 
         header.write(this.additionalLength, 20);
         header.write(this.encryptedLength, 24);
 
+        return header;
+    }
+}
+
+private immutable struct CryptoBlock {
+    public immutable CryptoBlockHeader header;
+    public immutable ubyte[] salt;
+    public immutable ubyte[] iv;
+    public immutable ubyte[] auth;
+    public immutable ubyte[] additional;
+    public immutable ubyte[] encrypted;
+
+    @trusted public this(SymmetricAlgorithm symAlg, HashAlgorithm hashAlg, KdfAlgorithm kdfAlg,
+        uint iterations, ushort memory, ushort parallelism, uint sectionCount, uint sectionNumber,
+        const ubyte[] salt, const ubyte[] iv, const ubyte[] auth, const ubyte[] additional, const ubyte[] encrypted)
+    {
+        this.header = CryptoBlockHeader(symAlg, hashAlg, kdfAlg, iterations, memory, parallelism, sectionCount, sectionNumber, cast(uint)additional.length, cast(uint)encrypted.length);
+
+        this.salt = cast(immutable)salt;
+        this.iv = cast(immutable)iv;
+        this.auth = cast(immutable)auth;
+        this.additional = cast(immutable)additional;
+        this.encrypted = cast(immutable)encrypted;
+    }
+
+    @trusted public this(immutable CryptoBlockHeader header, const ubyte[] data) {
+        ubyte[] bytes = cast(ubyte[])data;
+        this.header = header;
+        const uint saltLen = getHashLength(this.header.hash);
+        const uint ivLen = getCipherIVLength(this.header.symmetric);
+        const uint authLen = getAuthLength(this.header.symmetric, this.header.hash);
+
+        this.salt = cast(immutable)bytes[0..saltLen];
+        bytes = bytes[saltLen..$];
+        this.iv = cast(immutable)bytes[0..ivLen];
+        bytes = bytes[ivLen..$];
+        this.auth = cast(immutable)bytes[0..authLen];
+        bytes = bytes[authLen..$];
+        this.additional = cast(immutable)bytes[0..header.additionalLength];
+        bytes = bytes[header.additionalLength..$];
+        this.encrypted = cast(immutable)bytes[0..header.encryptedLength];
+    }
+
+    @trusted private ubyte[] toBytes() {
+        import std.bitmanip : write;
+
         OutBuffer buffer = new OutBuffer();
-        buffer.reserve(this.sectionSize + 28);
-        buffer.write(header);
+        buffer.reserve(getHeaderSize(1) + this.header.getBlockLength());
+        buffer.write(this.header.toBytes());
         buffer.write(salt);
         buffer.write(iv);
         buffer.write(auth);
@@ -193,10 +218,11 @@ private struct CryptoBlock {
         const ubyte[] ad = (chunkLen < chunkSize) ? additional : null;
         ubyte[] iv = random(getCipherIVLength(symmetric));
         const ubyte[] ep = data[processed..processed+chunkLen];
-        CryptographicResult result = encrypt_ex(derivedKey.key, iv, ep, ad, symmetric);
-        ubyte[] auth = !isAeadCipher(symmetric) ? hmac_ex(derivedKey.key, result.data, hash) : null;
-        blocks ~= CryptoBlock(symmetric, hash, kdf, n, r, p, chunks, i, derivedKey.salt, iv, auth !is null ? auth : result.auth, ad, result.data);
-        totalSize += (blocks[i].sectionSize + 28);
+        ubyte[] auth = null;
+        const ubyte[] result = encrypt_ex(symmetric, derivedKey.key, iv, ep, ad, auth);
+        auth = !isAeadCipher(symmetric) ? hmac_ex(derivedKey.key, result, hash) : auth;
+        blocks ~= CryptoBlock(symmetric, hash, kdf, n, r, p, chunks, i, derivedKey.salt, iv, auth, ad, result);
+        totalSize += (blocks[i].header.getHeaderLength() + blocks[i].header.getBlockLength());
         processed += chunkLen;
     }
 
@@ -208,7 +234,7 @@ private struct CryptoBlock {
     return buffer.toBytes();
 }
 
-@trusted public CryptographicResult encrypt_ex(const ubyte[] key, const ubyte[] iv, const ubyte[] data, const ubyte[] additional, SymmetricAlgorithm algorithm) {
+@trusted public ubyte[] encrypt_ex(SymmetricAlgorithm algorithm, const ubyte[] key, const ubyte[] iv, const ubyte[] data, const ubyte[] additional, out ubyte[] auth) {
     //Get the OpenSSL cipher context
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (ctx is null) {
@@ -261,35 +287,44 @@ private struct CryptoBlock {
     written += len;
 
     //Extract the auth tag
-    ubyte[] auth = isAeadCipher(algorithm) ? new ubyte[getAuthLength(algorithm)] : null;
+    ubyte[] _auth = isAeadCipher(algorithm) ? new ubyte[getAuthLength(algorithm)] : null;
     if (isAeadCipher(algorithm)) {
-        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, getAuthLength(algorithm), auth.ptr) != 1) {
+        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, getAuthLength(algorithm), _auth.ptr) != 1) {
             throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
         }
     }
 
-    return CryptographicResult(output[0..written], auth);
+    auth = _auth;
+    return output[0..written];
 }
 
 @trusted public ubyte[] decrypt(const ubyte[] key, const ubyte[] data, out ubyte[] additional) {
     //Get Derived Key
-    CryptoBlock block = CryptoBlock(data);
-    const ushort totalSections = block.sectionCount;
-    KdfResult derivedKey = deriveKey(key, block.salt, block.symmetric, block.kdf, block.kdfIterations, block.scryptMemory, block.scryptParallelism, block.hash);
+    ubyte[] bytes = cast(ubyte[])data;
+    CryptoBlockHeader firstHeader = CryptoBlockHeader(bytes);
+    const uint totalSections = firstHeader.sectionCount;
 
+    OutBuffer adBuffer = new OutBuffer();
     OutBuffer buffer = new OutBuffer();
-    for(ushort i = 0; i < totalSections; i++) {
-        ubyte[] auth = !isAeadCipher(block.symmetric) ? hmac_ex(derivedKey.key, block.encrypted, block.hash) : null;
+    for(uint i = 0; i < totalSections; i++) {
+        CryptoBlockHeader header = CryptoBlockHeader(bytes);
+        auto hdrLen = header.getHeaderLength();
+        auto blockLen = header.getBlockLength();
+        bytes = bytes[hdrLen..$];
+        CryptoBlock block = CryptoBlock(header, bytes[0..blockLen]);
+        KdfResult derivedKey = deriveKey(key, block.salt, block.header.symmetric, block.header.kdf, block.header.kdfIterations, block.header.scryptMemory, block.header.scryptParallelism, block.header.hash);
+        ubyte[] auth = !isAeadCipher(block.header.symmetric) ? hmac_ex(derivedKey.key, block.encrypted, block.header.hash) : null;
         if (auth !is null && !constantTimeEquality(block.auth, auth)) {
             throw new CryptographicException("Block authentication failed!");
         }
 
-        ubyte[] result = decrypt_ex(derivedKey.key, block.iv, block.encrypted, block.auth, block.additional, block.symmetric);
+        ubyte[] result = decrypt_ex(derivedKey.key, block.iv, block.encrypted, block.auth, block.additional, block.header.symmetric);
 
+        adBuffer.write(cast(ubyte[])block.additional);
         buffer.write(result);
     }
 
-    additional = cast(ubyte[])block.additional;
+    additional = adBuffer.toBytes();
     return buffer.toBytes();
 }
 

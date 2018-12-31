@@ -14,5 +14,4 @@ script:
     - sudo make install >/dev/null
     - openssl version -a
     - cd ../
-    - ls -la /usr/local/lib/
     - LD_LIBRARY_PATH=/usr/local/lib dub test --config=library --compiler=$DC

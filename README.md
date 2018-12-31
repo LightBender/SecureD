@@ -95,11 +95,8 @@ ubyte[48] key = [0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC
 ubyte[] data = cast(ubyte[])"The quick brown fox jumps over the lazy dog.";
 
 ubyte[] enc = encrypt(key, data, null);
-if (validate(key, enc))
-{
-    //Note that decrypt performs a validation and will throw an exception if the validation fails.
-    ubyte[] dec = decrypt(key, enc, null);
-}
+//Note that decrypt performs a validation and will throw an exception if the validation fails.
+ubyte[] dec = decrypt(key, enc, null);
 ```
 
 ### ECC Key Derivation
