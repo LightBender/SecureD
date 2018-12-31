@@ -207,8 +207,6 @@ private immutable struct CryptoBlock {
     const real tcc = data.length / chunkSize;
     const ushort chunks = to!ushort(floor(tcc)+1);
 
-    //Get Derived Key
-    KdfResult derivedKey = deriveKey(key, null, symmetric, kdf, n, r, p, hash);
 
     CryptoBlock[] blocks;
     ulong processed = 0;
@@ -220,6 +218,9 @@ private immutable struct CryptoBlock {
         const ubyte[] ep = data[processed..processed+chunkLen];
         ubyte[] iv = random(getCipherIVLength(symmetric));
         ubyte[] auth = null;
+
+        //Get Derived Key
+        KdfResult derivedKey = deriveKey(key, null, symmetric, kdf, n, r, p, hash);
 
         //Encrypt data
         const ubyte[] result = encrypt_ex(symmetric, derivedKey.key, iv, ep, ad, auth);
