@@ -214,23 +214,32 @@ private immutable struct CryptoBlock {
     ulong processed = 0;
     ulong totalSize = additional.length;
     for(ushort i = 0; i < chunks; i++) {
+        //Prepare data for encryption
         const ulong chunkLen = (data.length-processed) >= chunkSize ? chunkSize : (data.length-processed);
         const ubyte[] ad = (chunkLen < chunkSize) ? additional : null;
-        ubyte[] iv = random(getCipherIVLength(symmetric));
         const ubyte[] ep = data[processed..processed+chunkLen];
+        ubyte[] iv = random(getCipherIVLength(symmetric));
         ubyte[] auth = null;
+
+        //Encrypt data
         const ubyte[] result = encrypt_ex(symmetric, derivedKey.key, iv, ep, ad, auth);
+
+        //Authentiate data if the cipher is not an AEAD cipher
         auth = !isAeadCipher(symmetric) ? hmac_ex(derivedKey.key, result, hash) : auth;
+
+        //Store results
         blocks ~= CryptoBlock(symmetric, hash, kdf, n, r, p, chunks, i, derivedKey.salt, iv, auth, ad, result);
         totalSize += (blocks[i].header.getHeaderLength() + blocks[i].header.getBlockLength());
         processed += chunkLen;
     }
 
+    //Write results to buffer
     OutBuffer buffer = new OutBuffer();
     buffer.reserve(totalSize);
     foreach(CryptoBlock block; blocks) {
         buffer.write(block.toBytes());
     }
+
     return buffer.toBytes();
 }
 
@@ -299,7 +308,6 @@ private immutable struct CryptoBlock {
 }
 
 @trusted public ubyte[] decrypt(const ubyte[] key, const ubyte[] data, out ubyte[] additional) {
-    //Get Derived Key
     ubyte[] bytes = cast(ubyte[])data;
     CryptoBlockHeader firstHeader = CryptoBlockHeader(bytes);
     const uint totalSections = firstHeader.sectionCount;
@@ -307,19 +315,25 @@ private immutable struct CryptoBlock {
     OutBuffer adBuffer = new OutBuffer();
     OutBuffer buffer = new OutBuffer();
     for(uint i = 0; i < totalSections; i++) {
+        //Extract block info
         CryptoBlockHeader header = CryptoBlockHeader(bytes);
         auto hdrLen = header.getHeaderLength();
         auto blockLen = header.getBlockLength();
         bytes = bytes[hdrLen..$];
         CryptoBlock block = CryptoBlock(header, bytes[0..blockLen]);
+        bytes = bytes[blockLen..$];
+
+        //Derive block key and verify block if required
         KdfResult derivedKey = deriveKey(key, block.salt, block.header.symmetric, block.header.kdf, block.header.kdfIterations, block.header.scryptMemory, block.header.scryptParallelism, block.header.hash);
         ubyte[] auth = !isAeadCipher(block.header.symmetric) ? hmac_ex(derivedKey.key, block.encrypted, block.header.hash) : null;
         if (auth !is null && !constantTimeEquality(block.auth, auth)) {
             throw new CryptographicException("Block authentication failed!");
         }
 
+        //Decrypt block
         ubyte[] result = decrypt_ex(derivedKey.key, block.iv, block.encrypted, block.auth, block.additional, block.header.symmetric);
 
+        //Write results to buffers
         adBuffer.write(cast(ubyte[])block.additional);
         buffer.write(result);
     }
