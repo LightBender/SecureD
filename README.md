@@ -136,5 +136,3 @@ ubyte[] a = [ 0x01 ];
 ubyte[] b = [ 0x01 ];
 bool isEqual = constantTimeEquality(a, b);
 ```
-
-NOTE: SecureD is built against OpenSSL 1.1.0 or greater. If you need to use OpenSSL 1.0.x add version 'OpenSSL10' to your command line.
