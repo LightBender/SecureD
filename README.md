@@ -86,8 +86,14 @@ ubyte[] key = pbkdf2(key, password, iterations, outputLength);
 ```
 
 ### Encryption/Decryption
+The encrypt and decrypt functions work on arbitrarily sized plaintexts of data. By default if a plaintext is larger than 256MiB it will be broken into multiple blocks with new derived keys for each block to prevent auth tag collisions. Using the defaults it is possible to securely store up to 1024PiB of information in a single file, however, it is possible to store up to store up to 16384PiB of plaintext. In practice, the lack of streams in D make this infeasible as no computer on earth has enough memory to achieve these numbers.
+
+By default the encrypt and decrypt functions include all infromation required to decrypt, except the key. This information is stored in a "header" which is prepended to the actual encrypted payload. If the cipher is an AEAD cipher, then any Additional Data will be included between the header and the encrypted payload.
+
+The encrypt_ex and decrypt_ex functions are provided to enable custom encryption and decryption scenarios and do not include any of the additional header information.
+
 ```D
-import secured.aes;
+import secured.symmetric;
 
 ubyte[48] key = [0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
                  0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,

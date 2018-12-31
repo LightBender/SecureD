@@ -207,7 +207,6 @@ private immutable struct CryptoBlock {
     const real tcc = data.length / chunkSize;
     const ushort chunks = to!ushort(floor(tcc)+1);
 
-
     CryptoBlock[] blocks;
     ulong processed = 0;
     ulong totalSize = additional.length;
