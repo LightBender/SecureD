@@ -1,8 +1,17 @@
 language: d
+dist: xenial
 
 d:
     - dmd
     - ldc
 
 script:
-    - dub test --config=library --compiler=$DC
+    - wget https://www.openssl.org/source/openssl-1.1.1a.tar.gz
+    - tar xzvf openssl-1.1.1a.tar.gz >/dev/null
+    - cd openssl-1.1.1a
+    - ./config -Wl,--enable-new-dtags,-rpath,'$(LIBRPATH)' >/dev/null
+    - make >/dev/null
+    - sudo make install >/dev/null
+    - openssl version -a
+    - cd ../
+    - LD_LIBRARY_PATH=/usr/local/lib dub test --config=library --compiler=$DC
