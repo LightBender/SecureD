@@ -64,7 +64,9 @@ extern(C) @nogc nothrow private @system
     else version(Windows)
     {
         import core.sys.windows.windows;
+		import core.sys.windows.wincrypt;
         import std.format;
+		
         HCRYPTPROV hCryptProv;
 
         //Get the cryptographic context from Windows
@@ -72,7 +74,7 @@ extern(C) @nogc nothrow private @system
             throw new CryptographicException("Unable to acquire Cryptographic Context.");
         }
         //Release the context when finished
-        scope(exit) CryptReleaseContext(hCryptoProv, 0);
+        scope(exit) CryptReleaseContext(hCryptProv, 0);
 
         //Generate the random bytes
         if (!CryptGenRandom(hCryptProv, cast(DWORD)buffer.length, buffer.ptr)) {
