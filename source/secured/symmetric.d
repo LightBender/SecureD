@@ -109,7 +109,7 @@ public immutable struct CryptoBlockHeader {
         this.encryptedLength = cast(immutable)bytes.read!uint();
     }
 
-    @safe public @property ulong getBlockLength() {
+    @safe public @property size_t getBlockLength() {
         const uint saltLen = getHashLength(this.hash);
         const uint ivLen = getCipherIVLength(this.symmetric);
         const uint authLen = getAuthLength(this.symmetric, this.hash);
@@ -208,11 +208,11 @@ private immutable struct CryptoBlock {
     const ushort chunks = to!ushort(floor(tcc)+1);
 
     CryptoBlock[] blocks;
-    ulong processed = 0;
-    ulong totalSize = additional.length;
+    size_t processed = 0;
+    size_t totalSize = additional.length;
     for(ushort i = 0; i < chunks; i++) {
         //Prepare data for encryption
-        const ulong chunkLen = (data.length-processed) >= chunkSize ? chunkSize : (data.length-processed);
+        const size_t chunkLen = (data.length-processed) >= chunkSize ? chunkSize : (data.length-processed);
         const ubyte[] ad = (chunkLen < chunkSize) ? additional : null;
         const ubyte[] ep = data[processed..processed+chunkLen];
         ubyte[] iv = random(getCipherIVLength(symmetric));
