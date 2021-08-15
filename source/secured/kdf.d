@@ -22,7 +22,7 @@ public struct KdfResult {
     return result;
 }
 
-@safe public bool pbkdf2_verify(KdfResult test, string password, uint iterations = 1_000_000) {
+@safe public bool pbkdf2_verify(scope const KdfResult test, string password, uint iterations = 1_000_000) {
     ubyte[] key = pbkdf2_ex(password, test.salt, HashAlgorithm.SHA2_384, getHashLength(HashAlgorithm.SHA2_384), iterations);
     return constantTimeEquality(test.key, key);
 }
