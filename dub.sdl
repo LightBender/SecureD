@@ -1,9 +1,14 @@
 name "secured"
 description "A cryptography library for D that encourages secure implementations through simple interfaces."
 authors "Adam Wilson" "Adam Williams" "Georgi Dimitrov" "Nathan Sashihara"
-copyright "Copyright © 2016-2018, Adam Wilson"
+copyright "Copyright © 2016-2023, Adam Wilson"
 license "BSL-1.0"
-lflags "-L/usr/local/lib/"
-dependency "openssl" version="~>1.1.6"
+
+lflags "-L/usr/local/lib/" "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib"
+libs "libcrypto" "libssl"
+libs "advapi32" platform="windows"
+
+dependency "openssl" version="~>3.0.1"
+versions "DeimosOpenSSL_3_0"
 targetType "library"
 targetPath "bin/"

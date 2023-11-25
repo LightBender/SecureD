@@ -19,7 +19,7 @@ enum int EVP_PKEY_CTRL_SCRYPT_P = (EVP_PKEY_ALG_CTRL + 12);
 enum int EVP_PKEY_CTRL_SCRYPT_MAXMEM_BYTES = (EVP_PKEY_ALG_CTRL + 13);
 
 extern (C):
-nothrow:
+//nothrow:
 public:
 
 ulong ERR_get_error();
@@ -30,6 +30,8 @@ EVP_MD_CTX* EVP_MD_CTX_new();
 void EVP_MD_CTX_free(EVP_MD_CTX* free);
 void EVP_MD_CIPHER_free(EVP_CIPHER_CTX* free);
 int EVP_PBE_scrypt(const char *pass, size_t passlen, const ubyte *salt, size_t saltlen, ulong N, ulong r, ulong p, ulong maxmem, ubyte *key, size_t keylen);
+int EVP_PKEY_get_size(EVP_PKEY* pkey);
+int EVP_PKEY_CTX_hkdf_mode(EVP_PKEY_CTX *pctx, int mode);
 
 const(EVP_CIPHER)* EVP_chacha20();
 const(EVP_CIPHER)* EVP_chacha20_poly1305();
@@ -42,8 +44,26 @@ enum int EVP_CTRL_AEAD_SET_IVLEN = 0x9;
 enum int EVP_CTRL_AEAD_GET_TAG = 0x10;
 enum int EVP_CTRL_AEAD_SET_TAG = 0x11;
 
+int EVP_PKEY_CTX_set_hkdf_mode(EVP_PKEY_CTX *pctx, int mode) {
+    auto res = EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MODE, 0, cast(void *)(mode));
+	while (ERR_peek_error() > 0) {
+		char[1024] errMsg;
+		ERR_error_string_n(ERR_get_error(), errMsg.ptr, 1024);
+		import std.stdio;
+		writeln(errMsg);
+	}
+	return res;
+}
+
 int EVP_PKEY_CTX_set_hkdf_md(EVP_PKEY_CTX *pctx, const EVP_MD *md) {
-    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MD, 0, cast(void *)(md));
+    auto res = EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MD, 0, cast(void *)(md));
+	while (ERR_peek_error() > 0) {
+		char[1024] errMsg;
+		ERR_error_string_n(ERR_get_error(), errMsg.ptr, 1024);
+		import std.stdio;
+		writeln(errMsg);
+	}
+	return res;
 }
 
 int EVP_PKEY_CTX_set1_hkdf_salt(EVP_PKEY_CTX *pctx, const ubyte[] salt) {

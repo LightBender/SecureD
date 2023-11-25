@@ -172,8 +172,17 @@ unittest
     if (EVP_PKEY_derive_init(pctx) <= 0) {
         throw new CryptographicException("Unable to create HKDF function.");
     }
-    
-    if (EVP_PKEY_CTX_set_hkdf_md(pctx, getOpenSSLHashAlgorithm(func)) <= 0) {
+	import std.stdio;
+
+    int errno = EVP_PKEY_CTX_set_hkdf_mode(pctx, 0);
+    if (errno <= 0) {
+		writeln(errno);
+        throw new CryptographicException("Unable to create HKDF hash function.");
+    }
+
+    errno = EVP_PKEY_CTX_set_hkdf_md(pctx, getOpenSSLHashAlgorithm(func));
+    if (errno <= 0) {
+		writeln(errno);
         throw new CryptographicException("Unable to create HKDF hash function.");
     }
 

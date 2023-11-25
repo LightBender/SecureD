@@ -58,7 +58,7 @@ import secured.util;
     }
 
     //Copy the OpenSSL digest to our D buffer.
-    size_t digestlen;
+    size_t digestlen = getHashLength(func);
     ubyte[] digest = new ubyte[getHashLength(func)];
     if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0) {
         throw new CryptographicException("Error while retrieving the digest.");

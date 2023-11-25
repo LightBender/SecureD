@@ -1,4 +1,4 @@
-module secured.rsa;  
+module secured.rsa;
 
 import core.memory;
 
@@ -26,7 +26,7 @@ public class RSA
     static EVP_PKEY *keypair;
 
     public this(const int RSA_KEYLEN = 4096)
-    { 
+    {
         // Reseed the OpenSSL RNG every time we create a new RSA Key to ensure that the result is truely random in threading/forking scenarios.
         ubyte[] seedbuf = random(32);
         RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
@@ -88,7 +88,7 @@ public class RSA
         BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
         keypair = PEM_read_bio_PUBKEY(bio, null, null, null);
         BIO_free_all(bio);
-    } 
+    }
 
     public ~this()
     {
@@ -112,44 +112,44 @@ public class RSA
         size_t* ekl        = &_ekl;
         ubyte** iv        = &_iv;
         size_t* ivl        = &_ivl;
-        
+
         // The header, symmetric encryption key ek and initialisation vector iv are prefixed the encrypted message
         // Having four length bytes in header imposes a 4 GB limit on the plaintext
 
         const ubyte* msg    = plaintext.ptr;
         size_t msgLen         = plaintext.length;
-        
+
         static if(size_t.sizeof == 8) {
             size_t maxHeaderL    = 2 + 2 + 4; // 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
-            size_t maxEKL        = EVP_PKEY_size(keypair);
+            size_t maxEKL        = EVP_PKEY_get_size(keypair);
             size_t maxIVL        = EVP_MAX_IV_LENGTH;
             size_t maxEncMsgLen    = msgLen + EVP_MAX_IV_LENGTH;
-            size_t maxTotalSize    = maxHeaderL + maxEKL + maxIVL + maxEncMsgLen; 
+            size_t maxTotalSize    = maxHeaderL + maxEKL + maxIVL + maxEncMsgLen;
 
             size_t encMsgLen = 0;
             size_t blockLen  = 0;
-           
+
             *ivl = EVP_MAX_IV_LENGTH;
 
             ubyte* buffer = cast(ubyte*)GC.malloc(maxTotalSize);
             if(buffer == null)
                 throw new CryptographicException("Malloc failed.");
-            
+
             *ek = buffer + maxHeaderL;
             *iv = buffer + maxHeaderL + maxEKL;
             *encMsg = buffer + maxHeaderL + maxEKL + maxIVL;
 version(OpenSSL10) {
-            EVP_CIPHER_CTX *rsaEncryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);    
+            EVP_CIPHER_CTX *rsaEncryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);
             if(rsaEncryptCtx == null)
                 throw new CryptographicException("Malloc failed.");
             EVP_CIPHER_CTX_init(rsaEncryptCtx);
 } else {
-            EVP_CIPHER_CTX *rsaEncryptCtx = EVP_CIPHER_CTX_new();    
+            EVP_CIPHER_CTX *rsaEncryptCtx = EVP_CIPHER_CTX_new();
 }
             scope(exit) {
                 if (rsaEncryptCtx !is null) {
 version(OpenSSL10) {
-                    EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);    
+                    EVP_CIPHER_CTX_cleanup(rsaEncryptCtx);
 } else {
                     EVP_CIPHER_CTX_free(rsaEncryptCtx);
 }
@@ -172,10 +172,10 @@ version(OpenSSL10) {
 
             ubyte* encMsgLenTemp = cast(ubyte*)(&encMsgLen);
             buffer[4..8] = encMsgLenTemp[0..4];
-                
+
             assert(*ekl == maxEKL);
             assert(*ivl == maxIVL);
-            
+
             return buffer[0 .. maxHeaderL + maxEKL + maxIVL + encMsgLen];
         }
         else
@@ -193,14 +193,14 @@ version(OpenSSL10) {
         static if(size_t.sizeof == 8) {
             // Header: 2 bytes for actual ekl, 2 bytes for actual ivl and 4 bytes for actual length
             size_t maxHeaderL    = 2 + 2 + 4;
-            size_t maxEKL        = EVP_PKEY_size(keypair);
+            size_t maxEKL        = EVP_PKEY_get_size(keypair);
             size_t maxIVL        = EVP_MAX_IV_LENGTH;
 
             ubyte* ek            = encMessage.ptr + maxHeaderL;
             ubyte[8] temp        = 0;
             temp[0..2]            = encMessage[0..2];
             int ekl                = (cast(int[])temp)[0];
-                
+
             ubyte* iv            = encMessage.ptr + maxHeaderL + maxEKL;
             temp                = 0;
             temp[0..2]            = encMessage[2..4];
@@ -210,7 +210,7 @@ version(OpenSSL10) {
             temp                = 0;
             temp[0..4]            = encMessage[4..8];
             size_t encMsgLen    = (cast(size_t[])temp)[0];
-            
+
             size_t decLen   = 0;
             size_t blockLen = 0;
             EVP_PKEY *key;
@@ -222,18 +222,18 @@ version(OpenSSL10) {
             }
 
 version(OpenSSL10) {
-            EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);    
+            EVP_CIPHER_CTX *rsaDecryptCtx = cast(EVP_CIPHER_CTX*)GC.malloc(EVP_CIPHER_CTX.sizeof);
             if(rsaDecryptCtx == null) {
                 throw new CryptographicException("Malloc failed.");
             }
             EVP_CIPHER_CTX_init(rsaDecryptCtx);
 } else {
-            EVP_CIPHER_CTX *rsaDecryptCtx = EVP_CIPHER_CTX_new();    
+            EVP_CIPHER_CTX *rsaDecryptCtx = EVP_CIPHER_CTX_new();
 }
             scope(exit) {
                 if (rsaDecryptCtx !is null) {
 version(OpenSSL10) {
-                    EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);    
+                    EVP_CIPHER_CTX_cleanup(rsaDecryptCtx);
 } else {
                     EVP_CIPHER_CTX_free(rsaDecryptCtx);
 }
@@ -268,7 +268,7 @@ version(OpenSSL10) {
         BIO_free_all(bio);
 
         return buffer;
-    } 
+    }
 
     public ubyte[] getPrivateKey(string password, int iterations = 25000, bool use3Des = false)
     {
@@ -309,7 +309,7 @@ version(OpenSSL10) {
     in
     {
         import std.exception: enforce;
-        enforce(inMessage.length <= (EVP_PKEY_size(keypair) - 42), new CryptographicException("Plainttext length exceeds allowance")); // 42 being the padding overhead for OAEP padding using SHA-1
+        enforce(inMessage.length <= (EVP_PKEY_get_size(keypair) - 42), new CryptographicException("Plainttext length exceeds allowance")); // 42 being the padding overhead for OAEP padding using SHA-1
     }
     body
     {
@@ -318,8 +318,8 @@ version(OpenSSL10) {
         ubyte *out2;
         const ubyte *in2 = inMessage.ptr;
         size_t outlen;
-        size_t inlen = inMessage.length; 
-            
+        size_t inlen = inMessage.length;
+
         ctx = EVP_PKEY_CTX_new(keypair,eng);
         if (!ctx)  {
             throw new CryptographicException("EVP_PKEY_CTX_new.");
@@ -329,11 +329,11 @@ version(OpenSSL10) {
                 EVP_PKEY_CTX_free(ctx);
             }
         }
-        
+
         if (EVP_PKEY_encrypt_init(ctx) <= 0) {
             throw new CryptographicException("EVP_PKEY_encrypt_init failed.");
         }
-        
+
         if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0) {
             throw new CryptographicException("EVP_PKEY_CTX_set_rsa_padding failed.");
         }
@@ -346,7 +346,7 @@ version(OpenSSL10) {
         if(out2 == null) {
             throw new CryptographicException("Malloc failed.");
         }
-            
+
         if (EVP_PKEY_encrypt(ctx, out2, &outlen, in2, inlen) <= 0) {
             throw new CryptographicException("EVP_PKEY_encrypt failed.");
         }
@@ -357,7 +357,7 @@ version(OpenSSL10) {
     ubyte[] decrypt(const ubyte[] inMessage)
     in
     {
-        assert(inMessage.length == EVP_PKEY_size(keypair));  // Should always hold as padding was added during encryption
+        assert(inMessage.length == EVP_PKEY_get_size(keypair));  // Should always hold as padding was added during encryption
     }
     body
     {
@@ -366,8 +366,8 @@ version(OpenSSL10) {
         ubyte *out2;
         const ubyte *in2 = inMessage.ptr;
         size_t outlen;
-        size_t inlen = inMessage.length; 
-            
+        size_t inlen = inMessage.length;
+
         ctx = EVP_PKEY_CTX_new(keypair,eng);
         if (!ctx) {
             throw new CryptographicException("EVP_PKEY_CTX_new failed");
@@ -377,7 +377,7 @@ version(OpenSSL10) {
                 EVP_PKEY_CTX_free(ctx);
             }
         }
-        
+
         if (EVP_PKEY_decrypt_init(ctx) <= 0) {
             throw new CryptographicException("EVP_PKEY_decrypt_init failed.");
         }
@@ -405,7 +405,7 @@ version(OpenSSL10) {
     public ubyte[] sign(ubyte[] data, bool useSha256 = false)
     out (signature)
     {
-        assert(signature.length == EVP_PKEY_size(keypair));
+        assert(signature.length == EVP_PKEY_get_size(keypair));
     }
     body
     {
@@ -448,7 +448,7 @@ version(OpenSSL10) {
     public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
     in
     {
-        assert(signature.length == EVP_PKEY_size(keypair));
+        assert(signature.length == EVP_PKEY_get_size(keypair));
     }
     body
     {
@@ -495,7 +495,7 @@ unittest
     scope(exit) keypair.destroy();
 
        ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
-    
+
     ubyte[] encMessage = keypair.seal(plaintext);
     ubyte[] decMessage = keypair.open(encMessage);
 
@@ -515,7 +515,7 @@ unittest
 
     auto privateKeyA = keypairA.getPrivateKey(null);
     auto publicKeyA  = keypairA.getPublicKey();
-    
+
        ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
 
     // Creating key from public key only
@@ -551,20 +551,20 @@ unittest
 
     auto privateKeyA = keypairA.getPrivateKey(null);
     auto publicKeyA  = keypairA.getPublicKey();
-    
+
        ubyte[] plaintext = cast(ubyte[])"This is a test This is a test This is a test This is a test";
 
     // Creating key from public key only
     auto keypairB        =  new RSA(publicKeyA);
     scope(exit)               keypairB.destroy();
-    
+
     auto publicKeyB        =  keypairB.getPublicKey();
     assert(publicKeyA     == publicKeyB,    "Public  keys A and B does not match");
 
     //  Creating key from private key only
     auto keypairC        =  new RSA(privateKeyA, null);
     scope(exit)               keypairC.destroy();
-    
+
     auto privateKeyC    =  keypairC.getPrivateKey(null);
     assert(privateKeyA    == privateKeyC,    "Private keys A and C does not match");
 
@@ -572,7 +572,7 @@ unittest
     ubyte[] encMessage    = keypairB.seal(plaintext);
     // Opening encrypted message using private key
     ubyte[] decMessage    = keypairC.open(encMessage);
-    
+
     assert(plaintext.length    == decMessage.length);
     assert(plaintext        == decMessage);
 }
@@ -590,7 +590,7 @@ unittest
     ubyte[48] plaintext = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
                             0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
                             0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
-    
+
     ubyte[] encMessage = keypair.encrypt(plaintext);
     ubyte[] decMessage = keypair.decrypt(encMessage);
 
@@ -613,12 +613,12 @@ unittest
 
     ubyte[] encMessage214 = keypair.encrypt(plaintext214);
     assert(encMessage214.length == 2048 / 8);
-    
+
     ubyte[] decMessage214 = keypair.decrypt(encMessage214);
 
     assert(plaintext214.length    == decMessage214.length);
     assert(plaintext214            == decMessage214);
-    
+
     // This should NOT work, as the plaintext is larger that allowed for this 2048 bit RSA keypair
     ubyte[215] plaintext215 = 2; // 2 being an arbitrary value
 
