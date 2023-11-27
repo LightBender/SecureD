@@ -1,14 +1,14 @@
 language: d
-dist: xenial
+dist: jammy
 
 d:
     - dmd
     - ldc
 
 script:
-    - wget https://www.openssl.org/source/openssl-1.1.1a.tar.gz
-    - tar xzvf openssl-1.1.1a.tar.gz >/dev/null
-    - cd openssl-1.1.1a
+    - wget https://www.openssl.org/source/openssl-3.0.12.tar.gz
+    - tar xzvf openssl-3.0.12.tar.gz >/dev/null
+    - cd openssl-3.0.12
     - ./config -Wl,--enable-new-dtags,-rpath,'$(LIBRPATH)' >/dev/null
     - make >/dev/null
     - sudo make install >/dev/null
