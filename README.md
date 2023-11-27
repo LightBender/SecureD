@@ -51,7 +51,7 @@ All API's are unittested using D's built in unittests. Any developer can verify 
 
 SecureD follows SemVer. This means that the API surface and cryptographic implementations may be different between major versions. Minor and Point versions are cryptographically compatible. Minor versions may add new cryptographic algorithms to existing capabilities. Newer versions will provide an upgrade path from older versions where feasible.
 
-SecureD is built against OpenSSL 3.0. or greater.
+SecureD is built against OpenSSL 3.0.12 or greater.
 
 ## Examples
 
