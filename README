@@ -45,4 +45,4 @@ Algorithms
 - RNG:              System RNG on POSIX and Windows
 - Other:            Constant Time Equality
 
-SecureD is built against OpenSSL 3.0.0 or greater.
+SecureD is built against OpenSSL 3.0.12 or greater.
