@@ -71,7 +71,7 @@ public enum HashAlgorithm : ubyte {
 unittest {
     import std.digest;
 
-    writeln("Testing Byte Array Hash:");
+    writeln("Testing SHA2 Byte Array Hash:");
 
     ubyte[] vec1 = hash_ex(cast(ubyte[])"", HashAlgorithm.SHA2_384);
     ubyte[] vec2 = hash_ex(cast(ubyte[])"abc", HashAlgorithm.SHA2_384);
@@ -89,6 +89,26 @@ unittest {
     assert(toHexString!(LetterCase.lower)(vec4) == "ed892481d8272ca6df370bf706e4d7bc1b5739fa2177aae6c50e946678718fc67a7af2819a021c2fc34e91bdb63409d7");
 }
 
+unittest {
+    import std.digest;
+
+    writeln("Testing SHA3 Byte Array Hash:");
+
+    ubyte[] vec1 = hash_ex(cast(ubyte[])"", HashAlgorithm.SHA3_384);
+    ubyte[] vec2 = hash_ex(cast(ubyte[])"abc", HashAlgorithm.SHA3_384);
+    ubyte[] vec3 = hash_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", HashAlgorithm.SHA3_384);
+    ubyte[] vec4 = hash_ex(cast(ubyte[])"The quick brown fox jumps over the lazy dog.", HashAlgorithm.SHA3_384);
+
+    writeln(toHexString!(LetterCase.lower)(vec1));
+    writeln(toHexString!(LetterCase.lower)(vec2));
+    writeln(toHexString!(LetterCase.lower)(vec3));
+    writeln(toHexString!(LetterCase.lower)(vec4));
+
+    assert(toHexString!(LetterCase.lower)(vec1) == "0c63a75b845e4f7d01107d852e4c2485c51a50aaaa94fc61995e71bbee983a2ac3713831264adb47fb6bd1e058d5f004");
+    assert(toHexString!(LetterCase.lower)(vec2) == "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25");
+    assert(toHexString!(LetterCase.lower)(vec3) == "991c665755eb3a4b6bbdfb75c78a492e8c56a22c5c4d7e429bfdbc32b9d4ad5aa04a1f076e62fea19eef51acd0657c22");
+    assert(toHexString!(LetterCase.lower)(vec4) == "1a34d81695b622df178bc74df7124fe12fac0f64ba5250b78b99c1273d4b080168e10652894ecad5f1f4d5b965437fb9");
+}
 
 @safe public ubyte[] hash(string path) {
     return hash_ex(path, HashAlgorithm.SHA2_384);
@@ -172,6 +192,12 @@ unittest {
         case HashAlgorithm.SHA2_256: return EVP_sha256();
         case HashAlgorithm.SHA2_384: return EVP_sha384();
         case HashAlgorithm.SHA2_512: return EVP_sha512();
+        case HashAlgorithm.SHA2_512_224: return EVP_sha512_224();
+        case HashAlgorithm.SHA2_512_256: return EVP_sha512_256();
+        case HashAlgorithm.SHA3_224: return EVP_sha3_224();
+        case HashAlgorithm.SHA3_256: return EVP_sha3_256();
+        case HashAlgorithm.SHA3_384: return EVP_sha3_384();
+        case HashAlgorithm.SHA3_512: return EVP_sha3_512();
         default:
             throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
     }
@@ -186,6 +212,12 @@ unittest {
         case HashAlgorithm.SHA2_256: return "sha256";
         case HashAlgorithm.SHA2_384: return "sha384";
         case HashAlgorithm.SHA2_512: return "sha512";
+        case HashAlgorithm.SHA2_512_224: return "sha512-224";
+        case HashAlgorithm.SHA2_512_256: return "sha512-256";
+        case HashAlgorithm.SHA3_224: return "sha3-224";
+        case HashAlgorithm.SHA3_256: return "sha3-256";
+        case HashAlgorithm.SHA3_384: return "sha3-384";
+        case HashAlgorithm.SHA3_512: return "sha3-512";
         default:
             throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
     }

@@ -220,6 +220,27 @@ unittest
     assert(toHexString!(LetterCase.lower)(vec3) == "d05e4ba15e07095b8b6dc3abbdde3f790fb4c1d6146e93e12312fbf54b5a1aff4c9c9108046fc390f2bef5fbcbf44d57ac05732525ccbf0a856821fe178f47c2");
 }
 
+unittest
+{
+    import std.digest;
+    import std.stdio;
+
+    writeln("Testing HKDF Extended with SHA3_384:");
+
+    ubyte[48] salt = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+    ubyte[] vec2 = hkdf_ex(cast(ubyte[])"abc", salt, "", 64, HashAlgorithm.SHA3_384);
+    ubyte[] vec3 = hkdf_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, "test", 64, HashAlgorithm.SHA3_384);
+
+    writeln(toHexString!(LetterCase.lower)(vec2));
+    writeln(toHexString!(LetterCase.lower)(vec3));
+
+    assert(toHexString!(LetterCase.lower)(vec2) == "41999e49a273f7f1367c7b3c7bd80d56fa27307cdfdf0274c022a0185080ddaa36410a93098f325785e5c27c406df535c91cc47096dc846d5c1dea671a40f944");
+    assert(toHexString!(LetterCase.lower)(vec3) == "15addd263fdab613056a7a82804c1d1c158ea901424d277c25407c15be4b7aa8cad52251de18b3151145035e94c8f360517bda7912d2249f80c9662c1a1cd345");
+}
+
 @safe public KdfResult scrypt(string password) {
     KdfResult result;
     result.salt = random(32);

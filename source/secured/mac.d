@@ -84,6 +84,8 @@ unittest {
     ubyte[] verify_basic_hash = hmac(key, cast(ubyte[])"");
     assert(hmac_verify(verify_basic_hash, key, cast(ubyte[])""));
 
+    writeln(toHexString!(LetterCase.lower)(verify_basic_hash));
+
     writeln("Testing HMAC Extended:");
 
     ubyte[] vec1 = hmac_ex(key, cast(ubyte[])"", HashAlgorithm.SHA2_384);
@@ -103,4 +105,6 @@ unittest {
 
     ubyte[] verify_hash = hmac_ex(keyshort, cast(ubyte[])"", HashAlgorithm.SHA2_256);
     assert(hmac_verify_ex(verify_hash, keyshort, cast(ubyte[])"", HashAlgorithm.SHA2_256));
+
+    writeln(toHexString!(LetterCase.lower)(verify_hash));
 }

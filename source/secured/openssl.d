@@ -44,6 +44,13 @@ ossl_param_st OSSL_PARAM_construct_end();
 
 int EVP_KDF_CTX_set_params(EVP_KDF_CTX* ctx, const(ossl_param_st)* params);
 
+const(EVP_MD)* EVP_sha512_224();
+const(EVP_MD)* EVP_sha512_256();
+const(EVP_MD)* EVP_sha3_224();
+const(EVP_MD)* EVP_sha3_256();
+const(EVP_MD)* EVP_sha3_384();
+const(EVP_MD)* EVP_sha3_512();
+
 extern(D):
 
 enum int EVP_PKEY_HKDF = 1036;
@@ -51,40 +58,6 @@ enum int EVP_PKEY_SCRYPT = 973;
 enum int EVP_CTRL_AEAD_SET_IVLEN = 0x9;
 enum int EVP_CTRL_AEAD_GET_TAG = 0x10;
 enum int EVP_CTRL_AEAD_SET_TAG = 0x11;
-
-int EVP_PKEY_CTX_set_hkdf_mode(EVP_PKEY_CTX *pctx, int mode) {
-    auto res = EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MODE, 0, cast(void *)(mode));
-	while (ERR_peek_error() > 0) {
-		char[1024] errMsg;
-		ERR_error_string_n(ERR_get_error(), errMsg.ptr, 1024);
-		import std.stdio;
-		writeln(errMsg);
-	}
-	return res;
-}
-
-int EVP_PKEY_CTX_set_hkdf_md(EVP_PKEY_CTX *pctx, const EVP_MD *md) {
-    auto res = EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_MD, 0, cast(void *)(md));
-	while (ERR_peek_error() > 0) {
-		char[1024] errMsg;
-		ERR_error_string_n(ERR_get_error(), errMsg.ptr, 1024);
-		import std.stdio;
-		writeln(errMsg);
-	}
-	return res;
-}
-
-int EVP_PKEY_CTX_set1_hkdf_salt(EVP_PKEY_CTX *pctx, const ubyte[] salt) {
-    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_SALT, cast(int)salt.length, cast(void *)salt.ptr);
-}
-
-int EVP_PKEY_CTX_set1_hkdf_key(EVP_PKEY_CTX *pctx, const ubyte[] key) {
-    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_KEY, cast(int)key.length, cast(void *)key.ptr);
-}
-
-int EVP_PKEY_CTX_add1_hkdf_info(EVP_PKEY_CTX *pctx, string info) {
-    return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_HKDF_INFO, cast(int)(cast(ubyte[])info).length, cast(void *)info);
-}
 
 int EVP_PKEY_CTX_set1_pbe_pass(EVP_PKEY_CTX *pctx, const ubyte[] password) {
     return EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, EVP_PKEY_CTRL_PASS, cast(int)password.length, cast(void *)(password));
