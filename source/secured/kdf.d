@@ -24,9 +24,9 @@ public struct KdfResult {
     return result;
 }
 
-@safe public bool pbkdf2_verify(scope const KdfResult test, string password, uint iterations = 1_000_000) {
-    ubyte[] key = pbkdf2_ex(password, test.salt, HashAlgorithm.SHA2_384, getHashLength(HashAlgorithm.SHA2_384), iterations);
-    return constantTimeEquality(test.key, key);
+@safe public bool pbkdf2_verify(const ubyte[] key, const ubyte[] salt, string password, uint iterations = 1_000_000) {
+    ubyte[] test = pbkdf2_ex(password, salt, HashAlgorithm.SHA2_384, getHashLength(HashAlgorithm.SHA2_384), iterations);
+    return constantTimeEquality(key, test);
 }
 
 @trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations)
@@ -66,7 +66,7 @@ unittest
     writefln("PBKDF2 took %sms for 1,000,000 iterations", sw.peek.total!"msecs");
 
     assert(result.key.length == 48);
-    assert(pbkdf2_verify(result, "password"));
+    assert(pbkdf2_verify(result.key, result.salt, "password"));
     writeln(toHexString!(LetterCase.lower)(result.key));
 
     //Test extended methods
