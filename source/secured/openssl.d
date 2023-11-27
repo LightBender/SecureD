@@ -26,15 +26,23 @@ ulong ERR_get_error();
 ulong ERR_peek_error();
 void ERR_error_string_n(ulong e, char *buf, size_t len);
 
-EVP_MD_CTX* EVP_MD_CTX_new();
-void EVP_MD_CTX_free(EVP_MD_CTX* free);
 void EVP_MD_CIPHER_free(EVP_CIPHER_CTX* free);
-int EVP_PBE_scrypt(const char *pass, size_t passlen, const ubyte *salt, size_t saltlen, ulong N, ulong r, ulong p, ulong maxmem, ubyte *key, size_t keylen);
-int EVP_PKEY_get_size(EVP_PKEY* pkey);
-int EVP_PKEY_CTX_hkdf_mode(EVP_PKEY_CTX *pctx, int mode);
 
-const(EVP_CIPHER)* EVP_chacha20();
-const(EVP_CIPHER)* EVP_chacha20_poly1305();
+struct ossl_param_st {
+    char *key;            		/* the name of the parameter */
+    uint data_type;       		/* declare what kind of content is in buffer */
+    void *data;                 /* value being passed in or out */
+    size_t data_size;           /* data size */
+    size_t return_size;         /* returned content size */
+};
+
+ossl_param_st OSSL_PARAM_construct_utf8_string(const char *key, char *buf, size_t bsize);
+ossl_param_st OSSL_PARAM_construct_octet_string(const char *key, void *buf, size_t bsize);
+ossl_param_st OSSL_PARAM_construct_utf8_ptr(const char *key, char **buf, size_t bsize);
+ossl_param_st OSSL_PARAM_construct_octet_ptr(const char *key, void **buf, size_t bsize);
+ossl_param_st OSSL_PARAM_construct_end();
+
+int EVP_KDF_CTX_set_params(EVP_KDF_CTX* ctx, const(ossl_param_st)* params);
 
 extern(D):
 

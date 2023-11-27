@@ -8,7 +8,7 @@ lflags "-L/usr/local/lib/" "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib"
 libs "libcrypto" "libssl"
 libs "advapi32" platform="windows"
 
-dependency "openssl" version="~>3.0.1"
+dependency "openssl" version="~>3.3.3"
 versions "DeimosOpenSSL_3_0"
 targetType "library"
 targetPath "bin/"

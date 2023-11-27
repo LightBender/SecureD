@@ -177,6 +177,20 @@ unittest {
     }
 }
 
+@trusted package string getOpenSSLHashAlgorithmString(HashAlgorithm func) {
+    import std.conv;
+    import std.format;
+
+    switch (func) {
+        case HashAlgorithm.SHA2_224: return "sha224";
+        case HashAlgorithm.SHA2_256: return "sha256";
+        case HashAlgorithm.SHA2_384: return "sha384";
+        case HashAlgorithm.SHA2_512: return "sha512";
+        default:
+            throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
+    }
+}
+
 @safe package uint getHashLength(HashAlgorithm func) {
     import std.conv;
     import std.format;

@@ -2,8 +2,10 @@ module secured.kdf;
 
 import std.typecons;
 import std.format;
+import std.string;
 
 import deimos.openssl.evp;
+import deimos.openssl.kdf;
 import secured.openssl;
 
 import secured.hash;
@@ -162,48 +164,39 @@ unittest
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
 
-    EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, null);
-    scope(exit) {
-        if(pctx !is null) {
-            EVP_PKEY_CTX_free(pctx);
-        }
-    }
+	EVP_KDF *kdf;
+    EVP_KDF_CTX *kctx = null;
+    ubyte[] derived = new ubyte[outputLen];
+    ossl_param_st[5] params;
 
-    if (EVP_PKEY_derive_init(pctx) <= 0) {
+    /* Find and allocate a context for the HKDF algorithm */
+    if ((kdf = EVP_KDF_fetch(null, "hkdf", null)) == null) {
         throw new CryptographicException("Unable to create HKDF function.");
     }
-	import std.stdio;
+    kctx = EVP_KDF_CTX_new(kdf);
+	scope(exit) {
+		if (kctx !is null) {
+			EVP_KDF_CTX_free(kctx);
+		}
+	}
 
-    int errno = EVP_PKEY_CTX_set_hkdf_mode(pctx, 0);
-    if (errno <= 0) {
-		writeln(errno);
-        throw new CryptographicException("Unable to create HKDF hash function.");
+    /* Build up the parameters for the derivation */
+	string hashName = getOpenSSLHashAlgorithmString(func);
+    params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)hashName.toStringz(), hashName.length+1);
+    params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt, salt.length);
+    params[2] = OSSL_PARAM_construct_octet_string("key".toStringz(), cast(void*)key, key.length);
+    params[3] = OSSL_PARAM_construct_octet_string("info".toStringz(), cast(void*)info, info.length);
+    params[4] = OSSL_PARAM_construct_end();
+    if (EVP_KDF_CTX_set_params(kctx, params.ptr) <= 0) {
+        throw new CryptographicException("Unable to set the HKDF parameters.");
     }
 
-    errno = EVP_PKEY_CTX_set_hkdf_md(pctx, getOpenSSLHashAlgorithm(func));
-    if (errno <= 0) {
-		writeln(errno);
-        throw new CryptographicException("Unable to create HKDF hash function.");
-    }
-
-    if (salt.length != 0 && EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt) <= 0) {
-        throw new CryptographicException("Unable to set HKDF salt.");
-    }
-
-    if (info.length != 0 && EVP_PKEY_CTX_add1_hkdf_info(pctx, info) <= 0) {
-        throw new CryptographicException("Unable to set HKDF info.");
-    }
-
-    if (EVP_PKEY_CTX_set1_hkdf_key(pctx, key) <= 0) {
-        throw new CryptographicException("Unable to set HKDF key.");
-    }
-
-    ubyte[] keyMaterial = new ubyte[outputLen];
-    if (EVP_PKEY_derive(pctx, keyMaterial.ptr, &outputLen) <= 0) {
+    /* Do the derivation */
+    if (EVP_KDF_derive(kctx, derived.ptr, outputLen, null) <= 0) {
         throw new CryptographicException("Unable to generate the requested key material.");
     }
 
-    return keyMaterial;
+	return derived;
 }
 
 unittest
