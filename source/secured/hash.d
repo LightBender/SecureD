@@ -19,14 +19,15 @@ public enum HashAlgorithm : ubyte {
     SHA3_256,
     SHA3_384,
     SHA3_512,
+	Default = SHA2_384,
 }
 
 @safe public ubyte[] hash(const ubyte[] data) {
-    return hash_ex(data, HashAlgorithm.SHA2_384);
+    return hash_ex(data, HashAlgorithm.Default);
 }
 
 @safe public bool hash_verify(ubyte[] test, ubyte[] data) {
-    ubyte[] hash = hash_ex(data, HashAlgorithm.SHA2_384);
+    ubyte[] hash = hash_ex(data, HashAlgorithm.Default);
     return constantTimeEquality(hash, test);
 }
 
@@ -111,11 +112,11 @@ unittest {
 }
 
 @safe public ubyte[] hash(string path) {
-    return hash_ex(path, HashAlgorithm.SHA2_384);
+    return hash_ex(path, HashAlgorithm.Default);
 }
 
 @safe public bool hash_verify(string path, ubyte[] test) {
-    ubyte[] hash = hash_ex(path, HashAlgorithm.SHA2_384);
+    ubyte[] hash = hash_ex(path, HashAlgorithm.Default);
     return constantTimeEquality(hash, test);
 }
 

@@ -10,11 +10,11 @@ import secured.util;
 
 
 @safe public ubyte[] hmac(const ubyte[] key, const ubyte[] data) {
-    return hmac_ex(key, data, HashAlgorithm.SHA2_384);
+    return hmac_ex(key, data, HashAlgorithm.Default);
 }
 
 @safe public bool hmac_verify(const ubyte[] test, const ubyte[] key, const ubyte[] data) {
-    ubyte[] hash = hmac_ex(key, data, HashAlgorithm.SHA2_384);
+    ubyte[] hash = hmac_ex(key, data, HashAlgorithm.Default);
     return constantTimeEquality(test, hash);
 }
 

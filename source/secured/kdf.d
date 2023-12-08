@@ -19,13 +19,13 @@ public struct KdfResult {
 
 @safe public KdfResult pbkdf2(string password, uint iterations = 1_000_000) {
     KdfResult result;
-    result.salt = random(getHashLength(HashAlgorithm.SHA2_384));
-    result.key = pbkdf2_ex(password, result.salt, HashAlgorithm.SHA2_384, getHashLength(HashAlgorithm.SHA2_384), iterations);
+    result.salt = random(getHashLength(HashAlgorithm.Default));
+    result.key = pbkdf2_ex(password, result.salt, HashAlgorithm.Default, getHashLength(HashAlgorithm.Default), iterations);
     return result;
 }
 
 @safe public bool pbkdf2_verify(const ubyte[] key, const ubyte[] salt, string password, uint iterations = 1_000_000) {
-    ubyte[] test = pbkdf2_ex(password, salt, HashAlgorithm.SHA2_384, getHashLength(HashAlgorithm.SHA2_384), iterations);
+    ubyte[] test = pbkdf2_ex(password, salt, HashAlgorithm.Default, getHashLength(HashAlgorithm.Default), iterations);
     return constantTimeEquality(key, test);
 }
 
@@ -154,8 +154,8 @@ unittest
 
 @safe public KdfResult hkdf(const ubyte[] key, size_t outputLen) {
     KdfResult result;
-    result.salt = random(getHashLength(HashAlgorithm.SHA2_384));
-    result.key = hkdf_ex(key, result.salt, string.init, outputLen, HashAlgorithm.SHA2_384);
+    result.salt = random(getHashLength(HashAlgorithm.Default));
+    result.key = hkdf_ex(key, result.salt, string.init, outputLen, HashAlgorithm.Default);
     return result;
 }
 
