@@ -1,12 +1,23 @@
 module secured.util;
 
+import std.stdio;
+
+import secured.openssl;
+
 public enum uint FILE_BUFFER_SIZE = 32768;
 
-@safe public class CryptographicException : Exception
+@trusted public class CryptographicException : Exception
 {
     this(string message)
     {
         super(message);
+        debug {
+        while(ERR_peek_error() != 0) {
+            char[] buf = new char[512];
+            ERR_error_string_n(ERR_get_error(), buf.ptr, 512);
+            writeln(buf);
+        }
+        }
     }
 }
 

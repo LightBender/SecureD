@@ -121,7 +121,7 @@ public immutable struct EncryptedMetadata {
     KdfResult derived = deriveKey(key, getCipherKeyLength(SymmetricAlgorithm.Default) * 2, null, KdfAlgorithm.HKDF);
     ubyte[] iv = random(getCipherIVLength(SymmetricAlgorithm.Default));
     ubyte[] authTag;
-    ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(SymmetricAlgorithm.Default)], derived.key[getCipherKeyLength(SymmetricAlgorithm.Default)..$], iv, SymmetricAlgorithm.Default, authTag);
+    ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(SymmetricAlgorithm.Default)], derived.key[getCipherKeyLength(SymmetricAlgorithm.Default)..$], iv, authTag, SymmetricAlgorithm.Default);
     return EncryptedData(result, EncryptedMetadata(authTag, derived.salt, iv));
 }
 
@@ -129,11 +129,11 @@ public immutable struct EncryptedMetadata {
     KdfResult derived = deriveKey(password.representation, getCipherKeyLength(SymmetricAlgorithm.Default) * 2, null, KdfAlgorithm.SCrypt);
     ubyte[] iv = random(getCipherIVLength(SymmetricAlgorithm.Default));
     ubyte[] authTag;
-    ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(SymmetricAlgorithm.Default)], derived.key[getCipherKeyLength(SymmetricAlgorithm.Default)..$], iv, SymmetricAlgorithm.Default, authTag);
+    ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(SymmetricAlgorithm.Default)], derived.key[getCipherKeyLength(SymmetricAlgorithm.Default)..$], iv, authTag, SymmetricAlgorithm.Default);
     return EncryptedData(result, EncryptedMetadata(authTag, derived.salt, iv));
 }
 
-@trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, SymmetricAlgorithm algorithm, out ubyte[] authTag) {
+@trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
     if (encryptionKey.length != getCipherKeyLength(algorithm)) {
         throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
     }
@@ -156,19 +156,7 @@ public immutable struct EncryptedMetadata {
     }
 
     //Initialize the cipher context
-    if (EVP_EncryptInit_ex(ctx, getOpenSslCipher(algorithm), null, null, null) != 1) {
-        throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-    }
-
-    //Initialize the AEAD context
-    if (isAeadCipher(algorithm)) {
-        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, cast(int)iv.length, null) != 1) {
-            throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-        }
-    }
-
-    //Set the Key and IV
-    if (EVP_EncryptInit_ex(ctx, null, null, encryptionKey.ptr, iv.ptr) != 1) {
+    if (EVP_EncryptInit_ex(ctx, getOpenSslCipher(algorithm), null, encryptionKey.ptr, iv.ptr) != 1) {
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
@@ -190,11 +178,11 @@ public immutable struct EncryptedMetadata {
     written += len;
 
     //Extract the complete ciphertext
-    if (EVP_EncryptFinal_ex(ctx, &output[written-1], &len) != 1) {
+    if (EVP_EncryptFinal_ex(ctx, &output[written], &len) != 1) {
         throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
     }
-    written += len;
 
+    written += len;
     ubyte[] result = output[0..written];
 
     //Extract the auth tag
@@ -240,7 +228,7 @@ public immutable struct EncryptedMetadata {
         throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
     }
 
-    if (!isAeadCipher(algorithm) && !hmac_verify(authTag, hmacKey, hmac(hmacKey, hmac(hmacKey, data) ~ hmac(hmacKey, associatedData)))) {
+    if (!isAeadCipher(algorithm) && !hmac_verify(authTag, hmacKey, hmac(hmacKey, data) ~ hmac(hmacKey, associatedData))) {
         throw new CryptographicException("Failed to verify the authTag.");
     }
 
@@ -256,19 +244,7 @@ public immutable struct EncryptedMetadata {
     }
 
     //Initialize the cipher context
-    if (!EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, null, null)) {
-        throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-    }
-
-    //Initialize the AEAD context
-    if (isAeadCipher(algorithm)) {
-        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, cast(int)iv.length, null)) {
-            throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-        }
-    }
-
-    //Set the Key and IV
-    if (!EVP_DecryptInit_ex(ctx, null, null, encryptionKey.ptr, iv.ptr)) {
+    if (!EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, encryptionKey.ptr, iv.ptr)) {
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
@@ -283,7 +259,7 @@ public immutable struct EncryptedMetadata {
     //Write data to the cipher context
     int written = 0;
     int len = 0;
-    ubyte[] output = new ubyte[data.length];
+    ubyte[] output = new ubyte[data.length + 32];
     if (!EVP_DecryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length)) {
         throw new CryptographicException("Unable to write bytes to cipher context.");
     }
@@ -292,12 +268,12 @@ public immutable struct EncryptedMetadata {
     //Use the supplied tag to verify the message
     if (isAeadCipher(algorithm)) {
         if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)authTag.length, (cast(ubyte[])authTag).ptr)) {
-            throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
+            throw new CryptographicException("Unable to set the authentication tag on the cipher context.");
         }
     }
 
     //Extract the complete plaintext
-    if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) <= 0) {
+    if (EVP_DecryptFinal_ex(ctx, &output[written], &len) <= 0) {
         throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
     }
     written += len;
@@ -391,56 +367,57 @@ unittest
                                 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
     writeln("Testing Encryption (No Additional Data)");
-    EncryptedData enc = encrypt(key, input);
     writeln("Encryption Input: ", cast(string)input);
+    EncryptedData enc = encrypt(key, input);
     writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc.cipherText));
     writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc.metadata.authTag));
 
     writeln("Testing Decryption (No Additional Data)");
+    writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc.cipherText));
     ubyte[] dec = decrypt(key, enc.cipherText, enc.metadata);
-    writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc.cipherText));
     writeln("Decryption Output: ", cast(string)dec);
 
     assert((cast(string)dec) == cast(string)input);
 
+    writeln("Metadata Bytes: ", toHexString!(LetterCase.lower)(enc.metadata.toBytes()));
+    string encoded = enc.toString();
+    writeln("Base64 Encoded: ", encoded);
+    EncryptedData test = EncryptedData(encoded);
+    ubyte[] eddec = decrypt(key, test);
+    writeln("Decryption Output:  ", cast(string)eddec);
+    assert((cast(string)eddec) == cast(string)input);
+
     ubyte[] ad = cast(ubyte[])"Associated Data";
 
     writeln("Testing Encryption (With Additional Data)");
-    EncryptedData enc2 = encrypt(key, input, ad);
     writeln("Encryption Input: ", cast(string)input);
     writeln("Encryption AD: ", cast(string)ad);
+    EncryptedData enc2 = encrypt(key, input, ad);
     writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc2.cipherText));
     writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc2.metadata.authTag));
 
     writeln("Testing Decryption (With Additional Data)");
-    ubyte[] dec2 = decrypt(key, enc2.cipherText, enc2.metadata, ad);
-    writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc2.cipherText));
+    writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc2.cipherText));
     writeln("Decryption AD: ", cast(string)ad);
+    ubyte[] dec2 = decrypt(key, enc2.cipherText, enc2.metadata, ad);
     writeln("Decryption Output: ", cast(string)dec2);
 
     assert((cast(string)dec2) == cast(string)input);
 
     writeln("Testing Non-AEAD Encryption (With Additional Data)");
-    EncryptedData enc3 = encrypt(key, input, ad);
+    ubyte[] test4iv = random(getCipherIVLength(SymmetricAlgorithm.AES256_CBC));
+    ubyte[] test4tag;
     writeln("Encryption Input: ", cast(string)input);
     writeln("Encryption AD: ", cast(string)ad);
-    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc3.cipherText));
-    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc3.metadata.authTag));
+    ubyte[] enc3 = encrypt_ex(input, ad, key, key, test4iv, test4tag, SymmetricAlgorithm.AES256_CBC);
+    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc3));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(test4tag));
 
     writeln("Testing Non-AEAD Decryption (With Additional Data)");
-    ubyte[] dec3 = decrypt(key, enc3.cipherText, enc3.metadata, ad);
-    writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc3.cipherText));
+    writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc3));
     writeln("Decryption AD: ", cast(string)ad);
+    ubyte[] dec3 = decrypt_ex(enc3, ad, key, key, test4iv, test4tag, SymmetricAlgorithm.AES256_CBC);
     writeln("Decryption Output: ", cast(string)dec3);
 
     assert((cast(string)dec3) == cast(string)input);
-
-    writeln("Metadata Bytes: ", toHexString!(LetterCase.lower)(enc3.metadata.toBytes()));
-    string encoded = enc3.toString();
-    writeln("Base64 Encoded: ", encoded);
-    EncryptedData test = EncryptedData(encoded);
-    ubyte[] dec4 = decrypt(key, test, ad);
-    writeln("Decryption Output: ", cast(string)dec4);
-
-    assert((cast(string)dec4) == cast(string)input);
 }

@@ -216,7 +216,7 @@ unittest
     }
 
     /* Build up the parameters for the derivation */
-    hashName = getOpenSSLHashAlgorithmString(func);
+    string hashName = getOpenSSLHashAlgorithmString(func);
     params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)hashName.toStringz(), hashName.length+1);
     params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt, salt.length);
     params[2] = OSSL_PARAM_construct_octet_string("key".toStringz(), cast(void*)key, key.length);
