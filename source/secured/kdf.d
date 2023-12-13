@@ -1,5 +1,6 @@
 module secured.kdf;
 
+import std.conv;
 import std.typecons;
 import std.format;
 import std.string;
@@ -12,9 +13,43 @@ import secured.hash;
 import secured.random;
 import secured.util;
 
+public enum uint defaultKdfIterations = 1_048_576;
+public enum ushort defaultSCryptR = 8;
+public enum ushort defaultSCryptP = 1;
+public enum ulong maxSCryptMemory = 4_294_967_296;
+
+public enum KdfAlgorithm : ubyte {
+    None,
+    PBKDF2,
+    PBKDF2_HKDF,
+    HKDF,
+    SCrypt,
+    Default = SCrypt,
+}
+
 public struct KdfResult {
     public ubyte[] salt;
     public ubyte[] key;
+}
+
+@trusted public KdfResult deriveKey(const ubyte[] key, uint bytes, const ubyte[] salt = null, KdfAlgorithm kdf = KdfAlgorithm.Default, uint n = defaultKdfIterations, ushort r = defaultSCryptR, ushort p = defaultSCryptP, HashAlgorithm hash = HashAlgorithm.Default) {
+    ubyte[] derivedKey;
+    ubyte[] _salt = salt is null ? random(getHashLength(hash)) : cast(ubyte[])salt;
+
+    if (kdf == KdfAlgorithm.PBKDF2) {
+        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
+    }
+    if (kdf == KdfAlgorithm.PBKDF2_HKDF) {
+        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
+        derivedKey = hkdf_ex(derivedKey, _salt, string.init, bytes, hash);
+    }
+    if (kdf == KdfAlgorithm.HKDF) {
+        derivedKey = hkdf_ex(key, _salt, string.init, bytes, hash);
+    }
+    if (kdf == KdfAlgorithm.SCrypt) {
+        derivedKey = scrypt_ex(key, _salt, n, r, p, maxSCryptMemory,bytes);
+    }
+    return KdfResult(_salt, derivedKey);
 }
 
 @safe public KdfResult pbkdf2(string password, uint iterations = 1_000_000) {
@@ -164,7 +199,7 @@ unittest
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
 
-	EVP_KDF *kdf;
+    EVP_KDF *kdf;
     EVP_KDF_CTX *kctx = null;
     ubyte[] derived = new ubyte[outputLen];
     ossl_param_st[5] params;
@@ -174,14 +209,14 @@ unittest
         throw new CryptographicException("Unable to create HKDF function.");
     }
     kctx = EVP_KDF_CTX_new(kdf);
-	scope(exit) {
-		if (kctx !is null) {
-			EVP_KDF_CTX_free(kctx);
-		}
-	}
+    scope(exit) {
+        if (kctx !is null) {
+            EVP_KDF_CTX_free(kctx);
+        }
+    }
 
     /* Build up the parameters for the derivation */
-	string hashName = getOpenSSLHashAlgorithmString(func);
+    hashName = getOpenSSLHashAlgorithmString(func);
     params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)hashName.toStringz(), hashName.length+1);
     params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt, salt.length);
     params[2] = OSSL_PARAM_construct_octet_string("key".toStringz(), cast(void*)key, key.length);

@@ -1,6 +1,6 @@
 name "secured"
 description "A cryptography library for D that encourages secure implementations through simple interfaces."
-authors "Adam Wilson" "Adam Williams" "Georgi Dimitrov" "Nathan Sashihara"
+authors "Adam Wilson" "Cédric Picard" "Adam Williams" "Georgi Dimitrov" "Nathan Sashihara" "Jan Jurzitza"
 copyright "Copyright © 2016-2023, Adam Wilson"
 license "BSL-1.0"
 
