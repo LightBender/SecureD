@@ -79,8 +79,8 @@ public immutable struct SymmetricMetadata {
 }
 
 public struct SymmetricKey {
-    private ubyte[] value;
-    private SymmetricAlgorithm algorithm;
+    package ubyte[] value;
+    package SymmetricAlgorithm algorithm;
     @disable this();
 
     public @property ubyte[] key() { return value; }

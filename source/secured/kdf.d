@@ -11,6 +11,7 @@ import secured.openssl;
 
 import secured.hash;
 import secured.random;
+import secured.symmetric;
 import secured.util;
 
 public enum uint defaultKdfIterations = 1_048_576;
@@ -187,10 +188,14 @@ unittest
     assert(toHexString!(LetterCase.lower)(vec3) == "d1aacafea3a9fdf3ee6236b1b45527974ea01539b4a7cc493bba56e15e14d520");
 }
 
-@safe public KdfResult hkdf(const ubyte[] key, size_t outputLen) {
+@safe public KdfResult hkdf(const SymmetricKey key) {
+    return hkdf(key, getCipherKeyLength(key.algorithm));
+}
+
+@safe public KdfResult hkdf(const SymmetricKey key, size_t outputLen) {
     KdfResult result;
     result.salt = random(getHashLength(HashAlgorithm.Default));
-    result.key = hkdf_ex(key, result.salt, string.init, outputLen, HashAlgorithm.Default);
+    result.key = hkdf_ex(key.value, result.salt, string.init, outputLen, HashAlgorithm.Default);
     return result;
 }
 
