@@ -16,7 +16,7 @@ import secured.util;
 public enum uint defaultKdfIterations = 1_048_576;
 public enum ushort defaultSCryptR = 8;
 public enum ushort defaultSCryptP = 1;
-public enum ulong maxSCryptMemory = 4_294_967_296;
+public enum ulong maxSCryptMemory = 1_074_790_400;
 
 public enum KdfAlgorithm : ubyte {
     None,
@@ -279,15 +279,19 @@ unittest
 @safe public KdfResult scrypt(string password) {
     KdfResult result;
     result.salt = random(32);
-    result.key = scrypt_ex(password, result.salt, 1_048_576, 8, 1, 1_074_790_400, 64);
+    result.key = scrypt_ex(password, result.salt, defaultSCryptR, defaultSCryptR, defaultSCryptP, maxSCryptMemory, 64);
     return result;
 }
 
 @safe public KdfResult scrypt(const ubyte[] password) {
     KdfResult result;
     result.salt = random(32);
-    result.key = scrypt_ex(password, result.salt, 1_048_576, 8, 1, 1_074_790_400, 64);
+    result.key = scrypt_ex(password, result.salt, defaultKdfIterations, defaultSCryptR, defaultSCryptP, maxSCryptMemory, 64);
     return result;
+}
+
+@trusted public ubyte[] scrypt_ex(string password, const ubyte[] salt, size_t length) {
+    return scrypt_ex(cast(ubyte[])password, salt, defaultKdfIterations, defaultSCryptR, defaultSCryptP, maxSCryptMemory, length);
 }
 
 @trusted public ubyte[] scrypt_ex(string password, const ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, size_t length) {
