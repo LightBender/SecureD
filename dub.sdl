@@ -4,7 +4,8 @@ authors "Adam Wilson" "Cédric Picard" "Adam Williams" "Georgi Dimitrov" "Nathan
 copyright "Copyright © 2016-2023, Adam Wilson"
 license "BSL-1.0"
 
-lflags "-L/usr/local/lib/" "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib"
+lflags "-L/usr/local/lib/" platform="posix"
+lflags "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib" platform="windows"
 libs "libcrypto" "libssl"
 libs "advapi32" platform="windows"
 
