@@ -241,6 +241,6 @@ unittest {
         case HashAlgorithm.SHA3_384: return 48;
         case HashAlgorithm.SHA3_512: return 64;
         default:
-            throw new CryptographicException(format("Hash Function '%s'", to!string(func)));
+            throw new CryptographicException(format("Hash Function '%s' is not supported.", to!string(func)));
     }
 }

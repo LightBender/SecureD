@@ -22,7 +22,6 @@ public enum ulong maxSCryptMemory = 1_074_790_400;
 public enum KdfAlgorithm : ubyte {
     None,
     PBKDF2,
-    PBKDF2_HKDF,
     HKDF,
     SCrypt,
     Default = SCrypt,
@@ -39,10 +38,6 @@ public struct KdfResult {
 
     if (kdf == KdfAlgorithm.PBKDF2) {
         derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
-    }
-    if (kdf == KdfAlgorithm.PBKDF2_HKDF) {
-        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
-        derivedKey = hkdf_ex(derivedKey, _salt, string.init, bytes, hash);
     }
     if (kdf == KdfAlgorithm.HKDF) {
         derivedKey = hkdf_ex(key, _salt, string.init, bytes, hash);
