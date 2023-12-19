@@ -40,24 +40,33 @@ public immutable struct EncryptedData {
     public immutable ubyte[] cipherText;
     public immutable ubyte[] authTag;
 
-    @safe public this(const string encoded) {
-        SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default;
-        this(Base64.decode(encoded), getCipherIVLength(algorithm), getAuthLength(algorithm));
+    private immutable SymmetricAlgorithm algorithm;
+    private immutable HashAlgorithm      hashAlgorithm;
+
+    @safe public this(const string encoded, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        this.algorithm = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
+        this(Base64.decode(encoded), getCipherIVLength(algorithm), getAuthLength(algorithm, hashAlgorithm), algorithm, hashAlgorithm);
     }
 
-    @trusted public this(const ubyte[] rawCiphertext, size_t ivLength, size_t authTagLength) {
+    @trusted public this(const ubyte[] rawCiphertext, size_t ivLength, size_t authTagLength, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
         if (rawCiphertext.length <= ivLength + authTagLength)
             throw new CryptographicException("Incorrect ciphertext length");
+
+        this.algorithm = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
 
         this.iv         = cast(immutable) rawCiphertext[0 .. ivLength];
         this.cipherText = cast(immutable) rawCiphertext[ivLength .. $-authTagLength];
         this.authTag    = cast(immutable) rawCiphertext[$-authTagLength .. $];
     }
 
-    @trusted public this(const ubyte[] cipherText, const ubyte[] iv, const ubyte[] authTag) {
-        this.iv         = cast(immutable) iv;
-        this.cipherText = cast(immutable) cipherText;
-        this.authTag    = cast(immutable) authTag;
+    @trusted public this(const ubyte[] cipherText, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        this.iv            = cast(immutable) iv;
+        this.cipherText    = cast(immutable) cipherText;
+        this.authTag       = cast(immutable) authTag;
+        this.algorithm     = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
     }
 
     public string toString() {
@@ -106,7 +115,7 @@ public struct SymmetricKey {
     KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, iv, KdfAlgorithm.HKDF);
     ubyte[] authTag;
     ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], iv, authTag, key.algorithm);
-    return EncryptedData(result, iv, authTag);
+    return EncryptedData(result, iv, authTag, key.algorithm);
 }
 
 @trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
@@ -176,6 +185,8 @@ public struct SymmetricKey {
 }
 
 @safe public ubyte[] decrypt(const SymmetricKey key, const EncryptedData data, const ubyte[] associatedData = null) {
+    if (data.algorithm != key.algorithm)
+        throw new CryptographicException("Key and data algorithms don't match");
     KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, data.iv, KdfAlgorithm.HKDF);
     return decrypt_ex(data.cipherText, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], data.iv, data.authTag, key.algorithm);
 }
