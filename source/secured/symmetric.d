@@ -17,17 +17,14 @@ import secured.openssl;
 public enum SymmetricAlgorithm : ubyte {
     AES128_GCM,
     AES128_CTR,
-    AES128_OFB,
     AES128_CFB,
     AES128_CBC,
     AES192_GCM,
     AES192_CTR,
-    AES192_OFB,
     AES192_CFB,
     AES192_CBC,
     AES256_GCM,
     AES256_CTR,
-    AES256_OFB,
     AES256_CFB,
     AES256_CBC,
     ChaCha20,
@@ -272,9 +269,6 @@ public struct SymmetricKey {
         case SymmetricAlgorithm.AES128_CFB: return EVP_aes_128_cfb();
         case SymmetricAlgorithm.AES192_CFB: return EVP_aes_192_cfb();
         case SymmetricAlgorithm.AES256_CFB: return EVP_aes_256_cfb();
-        case SymmetricAlgorithm.AES128_OFB: return EVP_aes_128_ofb();
-        case SymmetricAlgorithm.AES192_OFB: return EVP_aes_192_ofb();
-        case SymmetricAlgorithm.AES256_OFB: return EVP_aes_256_ofb();
         case SymmetricAlgorithm.AES128_CBC: return EVP_aes_128_cbc();
         case SymmetricAlgorithm.AES192_CBC: return EVP_aes_192_cbc();
         case SymmetricAlgorithm.AES256_CBC: return EVP_aes_256_cbc();
@@ -305,9 +299,6 @@ public struct SymmetricKey {
         case SymmetricAlgorithm.AES128_CFB: return 16;
         case SymmetricAlgorithm.AES192_CFB: return 24;
         case SymmetricAlgorithm.AES256_CFB: return 32;
-        case SymmetricAlgorithm.AES128_OFB: return 16;
-        case SymmetricAlgorithm.AES192_OFB: return 24;
-        case SymmetricAlgorithm.AES256_OFB: return 32;
         case SymmetricAlgorithm.AES128_CBC: return 16;
         case SymmetricAlgorithm.AES192_CBC: return 24;
         case SymmetricAlgorithm.AES256_CBC: return 32;
