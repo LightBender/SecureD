@@ -9,7 +9,6 @@ import secured.util;
 
 public enum HashAlgorithm : ubyte {
     None,
-    SHA2_224,
     SHA2_256,
     SHA2_384,
     SHA2_512,
@@ -189,7 +188,6 @@ unittest {
     import std.format;
 
     switch (func) {
-        case HashAlgorithm.SHA2_224: return EVP_sha224();
         case HashAlgorithm.SHA2_256: return EVP_sha256();
         case HashAlgorithm.SHA2_384: return EVP_sha384();
         case HashAlgorithm.SHA2_512: return EVP_sha512();
@@ -209,7 +207,6 @@ unittest {
     import std.format;
 
     switch (func) {
-        case HashAlgorithm.SHA2_224: return "sha224";
         case HashAlgorithm.SHA2_256: return "sha256";
         case HashAlgorithm.SHA2_384: return "sha384";
         case HashAlgorithm.SHA2_512: return "sha512";
@@ -230,7 +227,6 @@ unittest {
 
     switch (func) {
         case HashAlgorithm.None: return 0;
-        case HashAlgorithm.SHA2_224: return 24;
         case HashAlgorithm.SHA2_256: return 32;
         case HashAlgorithm.SHA2_384: return 48;
         case HashAlgorithm.SHA2_512: return 64;

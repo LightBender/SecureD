@@ -245,14 +245,14 @@ unittest
                        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
                        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
-    ubyte[] vec2 = hkdf_ex(cast(ubyte[])"abc", salt, "", 64, HashAlgorithm.SHA2_224);
-    ubyte[] vec3 = hkdf_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, "test", 64, HashAlgorithm.SHA2_224);
+    ubyte[] vec2 = hkdf_ex(cast(ubyte[])"abc", salt, "", 64, HashAlgorithm.SHA2_384);
+    ubyte[] vec3 = hkdf_ex(cast(ubyte[])"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, "test", 64, HashAlgorithm.SHA2_384);
 
     writeln(toHexString!(LetterCase.lower)(vec2));
     writeln(toHexString!(LetterCase.lower)(vec3));
 
-    assert(toHexString!(LetterCase.lower)(vec2) == "0fcc4d227bb180f4a2631da9bf158203ced36a73752d1f6fb05be764cbd13460556e6ddd69b0d3b2cdf08457a18253811e38d8059177e5dc22b5b52a6b1cb30a");
-    assert(toHexString!(LetterCase.lower)(vec3) == "d05e4ba15e07095b8b6dc3abbdde3f790fb4c1d6146e93e12312fbf54b5a1aff4c9c9108046fc390f2bef5fbcbf44d57ac05732525ccbf0a856821fe178f47c2");
+    assert(toHexString!(LetterCase.lower)(vec2) == "65e464a5d7026678a3af78bf0282592472f85ccd7d1040e2dea5cea9218276a960367d418154a1e95019182a3c857286860aa0711955829e896b5bcdb1224794");
+    assert(toHexString!(LetterCase.lower)(vec3) == "12a82466f85ead03f50bb502475b47ec50e7224a90f0219955bf09846ed72791206f6e713a529a0082bf7229093f2b4e6c6b467119518a2579a5b091ebe8ba12");
 }
 
 unittest
