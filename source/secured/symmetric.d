@@ -115,7 +115,9 @@ public struct SymmetricKey {
     KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, null, KdfAlgorithm.HKDF);
     ubyte[] iv = random(getCipherIVLength(key.algorithm));
     ubyte[] authTag;
-    ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], iv, authTag, key.algorithm);
+	import secured.windows.windows;
+	ubyte[] result = encrypt_aead_winapi(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], iv, authTag, key.algorithm);
+    //ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], iv, authTag, key.algorithm);
     return EncryptedData(result, SymmetricMetadata(derived.salt, iv, authTag));
 }
 
@@ -191,7 +193,9 @@ public struct SymmetricKey {
 
 @safe public ubyte[] decrypt(const SymmetricKey key, const ubyte[] data, const SymmetricMetadata metadata, const ubyte[] associatedData = null) {
     KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, metadata.keySalt, KdfAlgorithm.HKDF);
-    return decrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], metadata.iv, metadata.authTag, key.algorithm);
+    //return decrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], metadata.iv, metadata.authTag, key.algorithm);
+	import secured.windows.windows;
+	return decrypt_aead_winapi(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], metadata.iv, metadata.authTag, key.algorithm);
 }
 
 @trusted public ubyte[] decrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm) {

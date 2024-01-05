@@ -20,7 +20,10 @@ import secured.util;
 
 @trusted public ubyte[] hmac_ex(const ubyte[] key, const ubyte[] data, HashAlgorithm func)
 {
-    if (key.length > getHashLength(func)) {
+ 	import secured.windows.windows;
+	return hmac_winapi(key, data, func);
+/*
+   if (key.length > getHashLength(func)) {
         throw new CryptographicException(format("HMAC key must be less than or equal to %s bytes in length.", getHashLength(func)));
     }
 
@@ -65,6 +68,7 @@ import secured.util;
     }
 
     return digest;
+*/
 }
 
 @safe public bool hmac_verify_ex(const ubyte[] test, const ubyte[] key, const ubyte[] data, HashAlgorithm func){

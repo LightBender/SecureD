@@ -37,7 +37,9 @@ public struct KdfResult {
     ubyte[] _salt = salt is null ? random(getHashLength(hash)) : cast(ubyte[])salt;
 
     if (kdf == KdfAlgorithm.PBKDF2) {
-        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
+        //derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
+		import secured.windows.windows;
+        derivedKey = pbkdf2_winapi(to!string(key), _salt, hash, bytes, n);
     }
     if (kdf == KdfAlgorithm.HKDF) {
         derivedKey = hkdf_ex(key, _salt, string.init, bytes, hash);
@@ -199,12 +201,15 @@ unittest
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
 
+	import secured.windows.windows;
+	return hkdf_winapi(key, salt, info, outputLen, func);
+/*
     EVP_KDF *kdf;
     EVP_KDF_CTX *kctx = null;
     ubyte[] derived = new ubyte[outputLen];
     ossl_param_st[5] params;
 
-    /* Find and allocate a context for the HKDF algorithm */
+    // Find and allocate a context for the HKDF algorithm
     if ((kdf = EVP_KDF_fetch(null, "hkdf", null)) == null) {
         throw new CryptographicException("Unable to create HKDF function.");
     }
@@ -215,7 +220,7 @@ unittest
         }
     }
 
-    /* Build up the parameters for the derivation */
+    // Build up the parameters for the derivation
     string hashName = getOpenSSLHashAlgorithmString(func);
     params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)hashName.toStringz(), hashName.length+1);
     params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt, salt.length);
@@ -226,12 +231,13 @@ unittest
         throw new CryptographicException("Unable to set the HKDF parameters.");
     }
 
-    /* Do the derivation */
+    // Do the derivation
     if (EVP_KDF_derive(kctx, derived.ptr, outputLen, null) <= 0) {
         throw new CryptographicException("Unable to generate the requested key material.");
     }
 
 	return derived;
+*/
 }
 
 unittest

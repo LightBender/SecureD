@@ -32,6 +32,9 @@ public enum HashAlgorithm : ubyte {
 
 @trusted public ubyte[] hash_ex(const ubyte[] data, HashAlgorithm func)
 {
+	import secured.windows.windows;
+	return hash_winapi(data, func);
+/*
     //Create the OpenSSL context
     EVP_MD_CTX *mdctx;
     if ((mdctx = EVP_MD_CTX_new()) == null) {
@@ -61,6 +64,7 @@ public enum HashAlgorithm : ubyte {
     }
 
     return digest;
+*/
 }
 
 @safe public bool hash_verify_ex(const ubyte[] test, const ubyte[] data, HashAlgorithm func) {
