@@ -33,45 +33,41 @@ public enum SymmetricAlgorithm : ubyte {
 }
 
 public immutable struct EncryptedData {
+    public immutable ubyte[] iv;
     public immutable ubyte[] cipherText;
-    public immutable SymmetricMetadata metadata;
+    public immutable ubyte[] authTag;
 
-    @safe public this(const string encoded) {
-        string[] parts = encoded.split("~");
-        this.metadata = SymmetricMetadata(parts[0]);
-        this.cipherText = Base64.decode(parts[1]);
+    private immutable SymmetricAlgorithm algorithm;
+    private immutable HashAlgorithm      hashAlgorithm;
+
+    @safe public this(const string encoded, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        this.algorithm = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
+        this(Base64.decode(encoded), getCipherIVLength(algorithm), getAuthLength(algorithm, hashAlgorithm), algorithm, hashAlgorithm);
     }
 
-    @trusted public this(const ubyte[] cipherText, const SymmetricMetadata metadata) {
-        this.cipherText = cast(immutable)cipherText;
-        this.metadata = cast(immutable)metadata;
+    @trusted public this(const ubyte[] rawCiphertext, size_t ivLength, size_t authTagLength, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        if (rawCiphertext.length <= ivLength + authTagLength)
+            throw new CryptographicException("Incorrect ciphertext length");
+
+        this.algorithm = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
+
+        this.iv         = cast(immutable) rawCiphertext[0 .. ivLength];
+        this.cipherText = cast(immutable) rawCiphertext[ivLength .. $-authTagLength];
+        this.authTag    = cast(immutable) rawCiphertext[$-authTagLength .. $];
     }
 
-    public string toString() {
-        return metadata.toString() ~ "~" ~ to!string(Base64.encode(cipherText));
-    }
-}
-
-public immutable struct SymmetricMetadata {
-    private immutable ubyte[] keySalt;
-    private immutable ubyte[] iv;
-    private immutable ubyte[] authTag;
-
-    @trusted public this(const string encoded) {
-        string[] parts = encoded.split(".");
-        this.keySalt = Base64.decode(parts[0]);
-        this.iv = Base64.decode(parts[1]);
-        this.authTag = Base64.decode(parts[2]);
-    }
-
-    @trusted private this(const ubyte[] keySalt, const ubyte[] iv, const ubyte[] authTag) {
-        this.authTag = cast(immutable)authTag;
-        this.keySalt = cast(immutable)keySalt;
-        this.iv = cast(immutable)iv;
+    @trusted public this(const ubyte[] cipherText, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        this.iv            = cast(immutable) iv;
+        this.cipherText    = cast(immutable) cipherText;
+        this.authTag       = cast(immutable) authTag;
+        this.algorithm     = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
     }
 
     public string toString() {
-        return to!string(Base64.encode(keySalt) ~ "." ~  Base64.encode(iv)  ~ "." ~  Base64.encode(authTag));
+        return to!string(Base64.encode(iv ~ cipherText ~ authTag));
     }
 }
 
@@ -112,11 +108,11 @@ public struct SymmetricKey {
 }
 
 @safe public EncryptedData encrypt(const SymmetricKey key, const ubyte[] data, const ubyte[] associatedData = null) {
-    KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, null, KdfAlgorithm.HKDF);
     ubyte[] iv = random(getCipherIVLength(key.algorithm));
+    KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, iv, KdfAlgorithm.HKDF);
     ubyte[] authTag;
     ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], iv, authTag, key.algorithm);
-    return EncryptedData(result, SymmetricMetadata(derived.salt, iv, authTag));
+    return EncryptedData(result, iv, authTag, key.algorithm);
 }
 
 @trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
@@ -179,19 +175,17 @@ public struct SymmetricKey {
         }
         authTag = _auth;
     } else if (hmacKey.length > 0) {
-        authTag = hmac(hmacKey, hmac(hmacKey, result) ~ hmac(hmacKey, associatedData));
+        authTag = hmac(hmacKey, hash(iv) ~ hash(result) ~ hash(associatedData));
     }
 
     return result;
 }
 
 @safe public ubyte[] decrypt(const SymmetricKey key, const EncryptedData data, const ubyte[] associatedData = null) {
-    return decrypt(key, data.cipherText, data.metadata, associatedData);
-}
-
-@safe public ubyte[] decrypt(const SymmetricKey key, const ubyte[] data, const SymmetricMetadata metadata, const ubyte[] associatedData = null) {
-    KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, metadata.keySalt, KdfAlgorithm.HKDF);
-    return decrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], metadata.iv, metadata.authTag, key.algorithm);
+    if (data.algorithm != key.algorithm)
+        throw new CryptographicException("Key and data algorithms don't match");
+    KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, data.iv, KdfAlgorithm.HKDF);
+    return decrypt_ex(data.cipherText, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], data.iv, data.authTag, key.algorithm);
 }
 
 @trusted public ubyte[] decrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm) {
@@ -205,7 +199,7 @@ public struct SymmetricKey {
         throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
     }
 
-    if (!isAeadCipher(algorithm) && !hmac_verify(authTag, hmacKey, hmac(hmacKey, data) ~ hmac(hmacKey, associatedData))) {
+    if (!isAeadCipher(algorithm) && hmacKey.length != 0 && !hmac_verify(authTag, hmacKey, hash(iv) ~ hash(data) ~ hash(associatedData))) {
         throw new CryptographicException("Failed to verify the authTag.");
     }
 
@@ -233,6 +227,13 @@ public struct SymmetricKey {
         }
     }
 
+    //Use the supplied tag to verify the message
+    if (isAeadCipher(algorithm)) {
+        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)authTag.length, (cast(ubyte[])authTag).ptr)) {
+            throw new CryptographicException("Unable to set the authentication tag on the cipher context.");
+        }
+    }
+
     //Write data to the cipher context
     int written = 0;
     int len = 0;
@@ -241,13 +242,6 @@ public struct SymmetricKey {
         throw new CryptographicException("Unable to write bytes to cipher context.");
     }
     written += len;
-
-    //Use the supplied tag to verify the message
-    if (isAeadCipher(algorithm)) {
-        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)authTag.length, (cast(ubyte[])authTag).ptr)) {
-            throw new CryptographicException("Unable to set the authentication tag on the cipher context.");
-        }
-    }
 
     //Extract the complete plaintext
     if (EVP_DecryptFinal_ex(ctx, &output[written], &len) <= 0) {
@@ -319,7 +313,7 @@ public struct SymmetricKey {
     }
 }
 
-@safe package uint getAuthLength(SymmetricAlgorithm symmetric, HashAlgorithm hash = HashAlgorithm.None) {
+@safe package uint getAuthLength(SymmetricAlgorithm symmetric, HashAlgorithm hash = HashAlgorithm.Default) {
     switch(symmetric) {
         case SymmetricAlgorithm.AES128_GCM: return 16;
         case SymmetricAlgorithm.AES192_GCM: return 16;
@@ -348,16 +342,15 @@ unittest
     writeln("Encryption Input: ", cast(string)input);
     EncryptedData enc = encrypt(key, input);
     writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc.cipherText));
-    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc.metadata.authTag));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc.authTag));
 
     writeln("Testing Decryption (No Additional Data)");
     writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc.cipherText));
-    ubyte[] dec = decrypt(key, enc.cipherText, enc.metadata);
+    ubyte[] dec = decrypt(key, enc);
     writeln("Decryption Output: ", cast(string)dec);
 
     assert((cast(string)dec) == cast(string)input);
 
-    writeln("Metadata Bytes: ", enc.metadata.toString());
     string encoded = enc.toString();
     writeln("Base64 Encoded: ", encoded);
     EncryptedData test = EncryptedData(encoded);
@@ -372,29 +365,29 @@ unittest
     writeln("Encryption AD: ", cast(string)ad);
     EncryptedData enc2 = encrypt(key, input, ad);
     writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc2.cipherText));
-    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc2.metadata.authTag));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc2.authTag));
 
     writeln("Testing Decryption (With Additional Data)");
     writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc2.cipherText));
     writeln("Decryption AD: ", cast(string)ad);
-    ubyte[] dec2 = decrypt(key, enc2.cipherText, enc2.metadata, ad);
+    ubyte[] dec2 = decrypt(key, enc2, ad);
     writeln("Decryption Output: ", cast(string)dec2);
 
     assert((cast(string)dec2) == cast(string)input);
 
     writeln("Testing Non-AEAD Encryption (With Additional Data)");
-    ubyte[] test4iv = random(getCipherIVLength(SymmetricAlgorithm.AES256_CBC));
-    ubyte[] test4tag;
     writeln("Encryption Input: ", cast(string)input);
     writeln("Encryption AD: ", cast(string)ad);
-    ubyte[] enc3 = encrypt_ex(input, ad, key.value, key.value, test4iv, test4tag, SymmetricAlgorithm.AES256_CBC);
-    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc3));
-    writeln("AuthTag: ", toHexString!(LetterCase.lower)(test4tag));
+    SymmetricKey nonAeadKey = generateSymmetricKey(SymmetricAlgorithm.AES256_CBC);
+    EncryptedData enc3 = encrypt(nonAeadKey, input, ad);
+    writeln("Encryption Output: ", enc3);
+    writeln("IV: ", toHexString!(LetterCase.lower)(enc3.iv));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc3.authTag));
 
     writeln("Testing Non-AEAD Decryption (With Additional Data)");
-    writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc3));
+    writeln("Decryption Input:  ", enc3);
     writeln("Decryption AD: ", cast(string)ad);
-    ubyte[] dec3 = decrypt_ex(enc3, ad, key.value, key.value, test4iv, test4tag, SymmetricAlgorithm.AES256_CBC);
+    ubyte[] dec3 = decrypt(nonAeadKey, enc3, ad);
     writeln("Decryption Output: ", cast(string)dec3);
 
     assert((cast(string)dec3) == cast(string)input);
