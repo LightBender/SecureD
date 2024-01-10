@@ -84,12 +84,10 @@ public @trusted ubyte[] hmac_winapi(const ubyte[] key, const ubyte[] data, HashA
 	int bytesToCopy = 0;
 	ubyte[] output;
 	ubyte[] result;
-	ubyte[] buffer;
 
 	while(outputIndex < outputLen) {
 		//Setup buffer to hash
-		buffer = result ~ tinfo ~ count++;
-
+		ubyte[] buffer = result ~ tinfo ~ count++;
 		result = new ubyte[getHashLength(func)];
 		BCryptHash(phAlgorithm, cast(ubyte*)extract.ptr, cast(uint)extract.length, cast(ubyte*)buffer.ptr, cast(uint)buffer.length, cast(ubyte*)result.ptr, cast(uint)result.length);
 
@@ -110,7 +108,7 @@ public @trusted ubyte[] hmac_winapi(const ubyte[] key, const ubyte[] data, HashA
 	void* phKey = null;
 
 	ubyte[] output = new ubyte[data.length];
-	ubyte[] tag = new ubyte[12];
+	ubyte[] tag = new ubyte[16];
 	//ubyte[] context = new ubyte[12];
 	uint outputLen = 0;
 
@@ -132,7 +130,7 @@ public @trusted ubyte[] hmac_winapi(const ubyte[] key, const ubyte[] data, HashA
 	if (ret == 0xC0000225) throw new CryptographicException("Symmetric Algorithm '"~to!string(algorithm)~"' is not supported.");
 	ret = BCryptSetProperty(phAlgorithm, BCRYPT_CHAINING_MODE.toWinApiWideChars(), cast(ubyte*)BCRYPT_CHAIN_MODE_GCM, BCRYPT_CHAIN_MODE_GCM.sizeof, 0);
 	ret = BCryptGenerateSymmetricKey(phAlgorithm, &phKey, null, 0, cast(ubyte*)key.ptr, cast(uint)key.length, 0);
-	ret = BCryptEncrypt(phKey, cast(ubyte*)data.ptr, cast(uint)data.length, cast(void*)&info, cast(ubyte*)iv.ptr, cast(uint)iv.length, output.ptr, cast(uint)output.length, &outputLen, 0);
+	ret = BCryptEncrypt(phKey, cast(ubyte*)data.ptr, cast(uint)data.length, cast(void*)&info, null, 0, output.ptr, cast(uint)output.length, &outputLen, 0);
 	scope(exit) {
 		if (phKey != null) BCryptDestroyKey(phKey);
 		if (phAlgorithm != null) BCryptCloseAlgorithmProvider(phAlgorithm, 0);
@@ -168,11 +166,14 @@ public @trusted ubyte[] hmac_winapi(const ubyte[] key, const ubyte[] data, HashA
 		0,0,0
 	);
 
+	import std.stdio;
+	writeln(_BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO.sizeof);
+
 	long ret = BCryptOpenAlgorithmProvider(&phAlgorithm, algName.toWinApiWideChars(), MS_PRIMITIVE_PROVIDER.toWinApiWideChars(), 0);
 	if (ret == 0xC0000225) throw new CryptographicException("Symmetric Algorithm '"~to!string(algorithm)~"' is not supported.");
 	ret = BCryptSetProperty(phAlgorithm, BCRYPT_CHAINING_MODE.toWinApiWideChars(), cast(ubyte*)BCRYPT_CHAIN_MODE_GCM, BCRYPT_CHAIN_MODE_GCM.sizeof, 0);
 	ret = BCryptGenerateSymmetricKey(phAlgorithm, &phKey, null, 0, cast(ubyte*)key.ptr, cast(uint)key.length, 0);
-	ret = BCryptDecrypt(phKey, cast(ubyte*)data.ptr, cast(uint)data.length, cast(void*)&info, cast(ubyte*)iv.ptr, cast(uint)iv.length, output.ptr, cast(uint)output.length, &outputLen, 0);
+	ret = BCryptDecrypt(phKey, cast(ubyte*)data.ptr, cast(uint)data.length, cast(void*)&info, null, 0, output.ptr, cast(uint)output.length, &outputLen, 0);
 	scope(exit) {
 		if (phKey != null) BCryptDestroyKey(phKey);
 		if (phAlgorithm != null) BCryptCloseAlgorithmProvider(phAlgorithm, 0);
