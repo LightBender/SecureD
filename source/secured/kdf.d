@@ -32,22 +32,6 @@ public struct KdfResult {
     public ubyte[] key;
 }
 
-@trusted public KdfResult deriveKey(const ubyte[] key, uint bytes, const ubyte[] salt = null, KdfAlgorithm kdf = KdfAlgorithm.Default, uint n = defaultKdfIterations, ushort r = defaultSCryptR, ushort p = defaultSCryptP, HashAlgorithm hash = HashAlgorithm.Default) {
-    ubyte[] derivedKey;
-    ubyte[] _salt = salt is null ? random(getHashLength(hash)) : cast(ubyte[])salt;
-
-    if (kdf == KdfAlgorithm.PBKDF2) {
-        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, bytes, n);
-    }
-    if (kdf == KdfAlgorithm.HKDF) {
-        derivedKey = hkdf_ex(key, _salt, string.init, bytes, hash);
-    }
-    if (kdf == KdfAlgorithm.SCrypt) {
-        derivedKey = scrypt_ex(key, _salt, n, r, p, maxSCryptMemory,bytes);
-    }
-    return KdfResult(_salt, derivedKey);
-}
-
 @safe public KdfResult pbkdf2(string password, uint iterations = 1_000_000) {
     KdfResult result;
     result.salt = random(getHashLength(HashAlgorithm.Default));

@@ -38,7 +38,7 @@ public immutable struct EncryptedData {
     public immutable ubyte[] authTag;
 
     private immutable SymmetricAlgorithm algorithm;
-    private immutable HashAlgorithm      hashAlgorithm;
+    private immutable HashAlgorithm hashAlgorithm;
 
     @safe public this(const string encoded, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
         this.algorithm = algorithm;
@@ -92,8 +92,14 @@ public struct SymmetricKey {
 
 @safe public SymmetricKey generateSymmetricKey(const string password, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, KdfAlgorithm kdf = KdfAlgorithm.Default) {
     SymmetricKey key = SymmetricKey.init;
-    key.value = scrypt_ex(password, null, getCipherKeyLength(algorithm));
     key.algorithm = algorithm;
+    if (kdf == KdfAlgorithm.SCrypt) {
+        key.value = scrypt_ex(password, null, getCipherKeyLength(algorithm));
+    } else if (kdf == KdfAlgorithm.PBKDF2) {
+        key.value = pbkdf2_ex(password, null, HashAlgorithm.Default, getCipherKeyLength(algorithm), defaultKdfIterations);
+    } else {
+        throw new CryptographicException("Specified KDF '" ~ to!string(kdf) ~ "' is not supported.");
+    }
     return key;
 }
 
@@ -107,20 +113,21 @@ public struct SymmetricKey {
     return key;
 }
 
+pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, const ubyte[] salt, HashAlgorithm hash = HashAlgorithm.Default) {
+    return hkdf_ex(key, salt, string.init, bytes, hash);
+}
+
 @safe public EncryptedData encrypt(const SymmetricKey key, const ubyte[] data, const ubyte[] associatedData = null) {
     ubyte[] iv = random(getCipherIVLength(key.algorithm));
-    KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, iv, KdfAlgorithm.HKDF);
+    ubyte[] derived = deriveKey(key.value, getCipherKeyLength(key.algorithm), iv);
     ubyte[] authTag;
-    ubyte[] result = encrypt_ex(data, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], iv, authTag, key.algorithm);
+    ubyte[] result = encrypt_ex(data, associatedData, derived, iv, authTag, key.algorithm);
     return EncryptedData(result, iv, authTag, key.algorithm);
 }
 
-@trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
+@trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
     if (encryptionKey.length != getCipherKeyLength(algorithm)) {
         throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
-    }
-    if (!isAeadCipher(algorithm) && hmacKey.length > 0 && hmacKey.length < 16) {
-        throw new CryptographicException("Hash Key must be at least 16 bytes in length.");
     }
     if (iv.length != getCipherIVLength(algorithm)) {
         throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
@@ -174,8 +181,8 @@ public struct SymmetricKey {
             throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
         }
         authTag = _auth;
-    } else if (hmacKey.length > 0) {
-        authTag = hmac(hmacKey, hash(iv) ~ hash(result) ~ hash(associatedData));
+    } else {
+        authTag = hmac(iv, hash(result) ~ hash(associatedData));
     }
 
     return result;
@@ -184,22 +191,19 @@ public struct SymmetricKey {
 @safe public ubyte[] decrypt(const SymmetricKey key, const EncryptedData data, const ubyte[] associatedData = null) {
     if (data.algorithm != key.algorithm)
         throw new CryptographicException("Key and data algorithms don't match");
-    KdfResult derived = deriveKey(key.value, getCipherKeyLength(key.algorithm) * 2, data.iv, KdfAlgorithm.HKDF);
-    return decrypt_ex(data.cipherText, associatedData, derived.key[0..getCipherKeyLength(key.algorithm)], derived.key[getCipherKeyLength(key.algorithm)..$], data.iv, data.authTag, key.algorithm);
+    ubyte[] derived = deriveKey(key.value, getCipherKeyLength(key.algorithm), data.iv);
+    return decrypt_ex(data.cipherText, associatedData, derived, data.iv, data.authTag, key.algorithm);
 }
 
-@trusted public ubyte[] decrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] hmacKey, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm) {
+@trusted public ubyte[] decrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm) {
     if (encryptionKey.length != getCipherKeyLength(algorithm)) {
         throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
-    }
-    if (!isAeadCipher(algorithm) && hmacKey.length > 0 && hmacKey.length < 16) {
-        throw new CryptographicException("Hash Key must be at least 16 bytes in length.");
     }
     if (iv.length != getCipherIVLength(algorithm)) {
         throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
     }
 
-    if (!isAeadCipher(algorithm) && hmacKey.length != 0 && !hmac_verify(authTag, hmacKey, hash(iv) ~ hash(data) ~ hash(associatedData))) {
+    if (!isAeadCipher(algorithm) && !hmac_verify(authTag, iv, hash(data) ~ hash(associatedData))) {
         throw new CryptographicException("Failed to verify the authTag.");
     }
 
