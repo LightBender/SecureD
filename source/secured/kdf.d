@@ -1,5 +1,6 @@
 module secured.kdf;
 
+import std.base64;
 import std.conv;
 import std.typecons;
 import std.format;
@@ -20,11 +21,152 @@ public enum ushort defaultSCryptP = 1;
 public enum ulong maxSCryptMemory = 1_074_790_400;
 
 public enum KdfAlgorithm : ubyte {
-    None,
-    PBKDF2,
-    HKDF,
-    SCrypt,
+    None = 0,
+    PBKDF2 = 1,
+    HKDF = 2,
+    SCrypt = 3,
+    Argon2 = 4,
     Default = SCrypt,
+}
+
+public enum VerifyPasswordResult
+{
+    /// <summary>
+    /// The password verification was successful.
+    /// </summary>
+    Success,
+    /// <summary>
+    /// The password verification failed.
+    /// </summary>
+    Failure,
+    /// <summary>
+    /// The password was successfully verified, but needs to be rehashed to use updated hashing parameters.
+    /// </summary>
+    Rehash,
+}
+
+@safe public struct HashedPassword
+{
+    /// <summary>
+    /// The hashing algorithm used to secure the password.
+    /// </summary>
+    public KdfAlgorithm algorithm;
+    /// <summary>
+    /// The version of the hash parameters used to secure the password.
+    /// </summary>
+    public short parameterVersion;
+    /// <summary>
+    /// The salt used by the hashing function.
+    /// </summary>
+    public ubyte[] salt;
+    /// <summary>
+    /// The hashed password
+    /// </summary>
+    public ubyte[] derived;
+
+    /// <summary>
+    /// Constructs a HashedPassword object from the provided hashing parameters.
+    /// </summary>
+    /// <param name="derived">The hashed password.</param>
+    /// <param name="salt">The salt used by the hashing function.</param>
+    /// <param name="algorithm">The hashing algorithm used to secure the password.</param>
+    /// <param name="paramVersion">The version of the hash parameters used to secure the password.</param>
+    package this(ubyte[] derived, ubyte[] salt, KdfAlgorithm algorithm, ushort paramVersion)
+    {
+        this.algorithm = algorithm;
+        this.parameterVersion = paramVersion;
+        this.salt = salt;
+        this.derived = derived;
+    }
+
+    /// <summary>
+    /// Constructs a HashedPassword from an encoded string.
+    /// </summary>
+    /// <param name="encoded">The encoded string.</param>
+    /// <returns>A HashedPassword object containing the decoded string values.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The provided string is invalid.</exception>
+    public this(string encoded) {
+        auto parts = encoded.split(".");
+        if (parts.length != 4) throw new CryptographicException("Invalid password string provided.");
+
+        this.algorithm = to!KdfAlgorithm(to!int(parts[0]));
+        this.parameterVersion = to!ushort(parts[1]);
+        this.salt = Base64.decode(parts[2]);
+        this.derived = Base64.decode(parts[3]);
+    }
+
+    /// <summary>
+    /// Creates string containing the encoded password from the HashedPassword.
+    /// </summary>
+    /// <returns>The encoded password string</returns>
+    public string toString() {
+        return to!string(join([to!string(to!int(algorithm)), to!string(parameterVersion), Base64.encode(salt), Base64.encode(derived)], "."));
+    }
+}
+
+@safe public HashedPassword securePassword(string password, const ubyte[] pepper, KdfAlgorithm algorithm = KdfAlgorithm.Default) {
+    if (algorithm == KdfAlgorithm.HKDF) throw new CryptographicException("KdfAlgorithm.HKDF is not supported for password security.");
+
+    if (algorithm == KdfAlgorithm.PBKDF2) {
+        ubyte[] salt = random(32);
+        return HashedPassword(pbkdf2_ex(password, salt ~ pepper, HashAlgorithm.Default, 64, defaultKdfIterations), salt, algorithm, 1);
+    }
+
+    if (algorithm == KdfAlgorithm.SCrypt) {
+        ubyte[] salt = random(32);
+        return HashedPassword(scrypt_ex(password, salt ~ pepper, 64), salt, algorithm, 1);
+    }
+
+    if (algorithm == KdfAlgorithm.Argon2) throw new CryptographicException("Argon2 is not supported.");
+
+    throw new CryptographicException("KdfAlgorithm.None is not supported for password security.");
+}
+
+@safe public VerifyPasswordResult verifyPassword(string suppliedPassword, HashedPassword storedPassword, const ubyte[] pepper) {
+    if (storedPassword.algorithm == KdfAlgorithm.HKDF) throw new CryptographicException("KdfAlgorithm.HKDF is not supported for password security.");
+
+    if (storedPassword.algorithm == KdfAlgorithm.PBKDF2 && storedPassword.parameterVersion == 1) {
+        if (pbkdf2_verify_ex(storedPassword.derived, suppliedPassword, storedPassword.salt ~ pepper, HashAlgorithm.Default, 64, defaultKdfIterations)) return VerifyPasswordResult.Success;
+    }
+    else if (storedPassword.algorithm == KdfAlgorithm.PBKDF2 && storedPassword.parameterVersion == 0) {
+        if (pbkdf2_verify_ex(storedPassword.derived, suppliedPassword, storedPassword.salt ~ pepper, HashAlgorithm.SHA2_512, to!uint(storedPassword.derived.length), 100000)) return VerifyPasswordResult.Rehash;
+    }
+
+    if (storedPassword.algorithm == KdfAlgorithm.SCrypt && storedPassword.parameterVersion == 1) {
+        ubyte[] supplied = scrypt_ex(suppliedPassword, storedPassword.salt ~ pepper, 64);
+        if (supplied.constantTimeEquality(storedPassword.derived)) return VerifyPasswordResult.Success;
+    }
+
+    if (storedPassword.algorithm == KdfAlgorithm.Argon2) throw new CryptographicException("Argon2 is not supported.");
+
+    return VerifyPasswordResult.Failure;
+}
+
+unittest {
+    import std.digest;
+    import std.stdio;
+
+    ubyte[48] salt = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+    writeln("Successful Password Test");
+    HashedPassword successTest = securePassword("TestPassword!@#$%", salt);
+    writeln("Encoded: ", successTest.toString());
+    auto verifyResult = verifyPassword("TestPassword!@#$%", successTest, salt);
+    assert (verifyResult == VerifyPasswordResult.Success);
+
+    writeln("Failure Password Test");
+    HashedPassword failTest = securePassword("TestPassword!@#$%", salt);
+    writeln("Encoded: ", failTest.toString());
+    verifyResult = verifyPassword("TestPassword!@#$", failTest, salt);
+    assert (verifyResult == VerifyPasswordResult.Failure);
+
+    writeln("PBKDF2 Password Test");
+    HashedPassword pbkdf2Test = securePassword("TestPassword!@#$%", salt, KdfAlgorithm.PBKDF2);
+    writeln("Encoded: ", pbkdf2Test.toString());
+    verifyResult = verifyPassword("TestPassword!@#$%", pbkdf2Test, salt);
+    assert (verifyResult == VerifyPasswordResult.Success);
 }
 
 public struct KdfResult {
@@ -46,13 +188,13 @@ public struct KdfResult {
 
 @trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations)
 {
-    if (salt.length != getHashLength(func)) {
+/*    if (salt.length != getHashLength(func)) {
         throw new CryptographicException(format("The PBKDF2 salt must be %s bytes in length.", getHashLength(func)));
     }
     if (outputLen > getHashLength(func)) {
         throw new CryptographicException(format("The PBKDF2 output length must be less than or equal to %s bytes in length.", getHashLength(func)));
     }
-
+*/
     ubyte[] output = new ubyte[outputLen];
     if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, salt.ptr, cast(int)salt.length, iterations, getOpenSSLHashAlgorithm(func), outputLen, output.ptr) == 0) {
         throw new CryptographicException("Unable to execute PBKDF2 hash function.");
@@ -215,7 +357,7 @@ unittest
         throw new CryptographicException("Unable to generate the requested key material.");
     }
 
-	return derived;
+    return derived;
 }
 
 unittest

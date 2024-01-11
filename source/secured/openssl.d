@@ -19,7 +19,7 @@ enum int EVP_PKEY_CTRL_SCRYPT_P = (EVP_PKEY_ALG_CTRL + 12);
 enum int EVP_PKEY_CTRL_SCRYPT_MAXMEM_BYTES = (EVP_PKEY_ALG_CTRL + 13);
 
 extern (C):
-//nothrow:
+nothrow:
 public:
 
 ulong ERR_get_error();
@@ -29,8 +29,8 @@ void ERR_error_string_n(ulong e, char *buf, size_t len);
 void EVP_MD_CIPHER_free(EVP_CIPHER_CTX* free);
 
 struct ossl_param_st {
-    char *key;            		/* the name of the parameter */
-    uint data_type;       		/* declare what kind of content is in buffer */
+    char *key;                  /* the name of the parameter */
+    uint data_type;             /* declare what kind of content is in buffer */
     void *data;                 /* value being passed in or out */
     size_t data_size;           /* data size */
     size_t return_size;         /* returned content size */
