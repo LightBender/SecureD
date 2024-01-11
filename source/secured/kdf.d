@@ -174,27 +174,19 @@ public struct KdfResult {
     public ubyte[] key;
 }
 
-@safe public KdfResult pbkdf2(string password, uint iterations = 1_000_000) {
+@safe public KdfResult pbkdf2(string password, uint iterations = defaultKdfIterations) {
     KdfResult result;
     result.salt = random(getHashLength(HashAlgorithm.Default));
     result.key = pbkdf2_ex(password, result.salt, HashAlgorithm.Default, getHashLength(HashAlgorithm.Default), iterations);
     return result;
 }
 
-@safe public bool pbkdf2_verify(const ubyte[] key, const ubyte[] salt, string password, uint iterations = 1_000_000) {
+@safe public bool pbkdf2_verify(const ubyte[] key, const ubyte[] salt, string password, uint iterations = defaultKdfIterations) {
     ubyte[] test = pbkdf2_ex(password, salt, HashAlgorithm.Default, getHashLength(HashAlgorithm.Default), iterations);
     return constantTimeEquality(key, test);
 }
 
-@trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations)
-{
-/*    if (salt.length != getHashLength(func)) {
-        throw new CryptographicException(format("The PBKDF2 salt must be %s bytes in length.", getHashLength(func)));
-    }
-    if (outputLen > getHashLength(func)) {
-        throw new CryptographicException(format("The PBKDF2 output length must be less than or equal to %s bytes in length.", getHashLength(func)));
-    }
-*/
+@trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
     ubyte[] output = new ubyte[outputLen];
     if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, salt.ptr, cast(int)salt.length, iterations, getOpenSSLHashAlgorithm(func), outputLen, output.ptr) == 0) {
         throw new CryptographicException("Unable to execute PBKDF2 hash function.");
@@ -227,13 +219,11 @@ unittest
     writeln(toHexString!(LetterCase.lower)(result.key));
 
     //Test extended methods
-    ubyte[64] salt = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
-                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
-                       0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+    ubyte[32] salt = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
                        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 
-    ubyte[] key = pbkdf2_ex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, HashAlgorithm.SHA2_512, 64, 100000);
-    assert(pbkdf2_verify_ex(key, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, HashAlgorithm.SHA2_512, 64, 100000));
+    ubyte[] key = pbkdf2_ex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, HashAlgorithm.SHA2_384, 64, 100000);
+    assert(pbkdf2_verify_ex(key, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, HashAlgorithm.SHA2_384, 64, 100000));
     writeln(toHexString!(LetterCase.lower)(key));
 }
 
