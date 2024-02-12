@@ -9,7 +9,6 @@ import secured.util;
 
 public enum HashAlgorithm : ubyte {
     None,
-    SHA2_224,
     SHA2_256,
     SHA2_384,
     SHA2_512,
@@ -19,14 +18,15 @@ public enum HashAlgorithm : ubyte {
     SHA3_256,
     SHA3_384,
     SHA3_512,
+	Default = SHA2_384,
 }
 
 @safe public ubyte[] hash(const ubyte[] data) {
-    return hash_ex(data, HashAlgorithm.SHA2_384);
+    return hash_ex(data, HashAlgorithm.Default);
 }
 
 @safe public bool hash_verify(ubyte[] test, ubyte[] data) {
-    ubyte[] hash = hash_ex(data, HashAlgorithm.SHA2_384);
+    ubyte[] hash = hash_ex(data, HashAlgorithm.Default);
     return constantTimeEquality(hash, test);
 }
 
@@ -111,11 +111,11 @@ unittest {
 }
 
 @safe public ubyte[] hash(string path) {
-    return hash_ex(path, HashAlgorithm.SHA2_384);
+    return hash_ex(path, HashAlgorithm.Default);
 }
 
 @safe public bool hash_verify(string path, ubyte[] test) {
-    ubyte[] hash = hash_ex(path, HashAlgorithm.SHA2_384);
+    ubyte[] hash = hash_ex(path, HashAlgorithm.Default);
     return constantTimeEquality(hash, test);
 }
 
@@ -188,7 +188,6 @@ unittest {
     import std.format;
 
     switch (func) {
-        case HashAlgorithm.SHA2_224: return EVP_sha224();
         case HashAlgorithm.SHA2_256: return EVP_sha256();
         case HashAlgorithm.SHA2_384: return EVP_sha384();
         case HashAlgorithm.SHA2_512: return EVP_sha512();
@@ -208,7 +207,6 @@ unittest {
     import std.format;
 
     switch (func) {
-        case HashAlgorithm.SHA2_224: return "sha224";
         case HashAlgorithm.SHA2_256: return "sha256";
         case HashAlgorithm.SHA2_384: return "sha384";
         case HashAlgorithm.SHA2_512: return "sha512";
@@ -229,7 +227,6 @@ unittest {
 
     switch (func) {
         case HashAlgorithm.None: return 0;
-        case HashAlgorithm.SHA2_224: return 24;
         case HashAlgorithm.SHA2_256: return 32;
         case HashAlgorithm.SHA2_384: return 48;
         case HashAlgorithm.SHA2_512: return 64;
@@ -240,6 +237,6 @@ unittest {
         case HashAlgorithm.SHA3_384: return 48;
         case HashAlgorithm.SHA3_512: return 64;
         default:
-            throw new CryptographicException(format("Hash Function '%s'", to!string(func)));
+            throw new CryptographicException(format("Hash Function '%s' is not supported.", to!string(func)));
     }
 }

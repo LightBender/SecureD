@@ -1,7 +1,9 @@
 module secured.symmetric;
 
+import std.base64;
 import std.conv;
-import std.outbuffer;
+import std.stdio;
+import std.string;
 
 import deimos.openssl.evp;
 
@@ -12,36 +14,17 @@ import secured.random;
 import secured.util;
 import secured.openssl;
 
-public enum CryptoHeaderVersion = 1;
-public enum uint defaultKdfIterations = 1_048_576;
-public enum ushort defaultSCryptR = 8;
-public enum ushort defaultSCryptP = 1;
-public enum uint defaultChunkSize = 268_435_456;
-public enum ulong maxSCryptMemory = 4_294_967_296;
-
-public enum KdfAlgorithm : ubyte {
-    None,
-    PBKDF2,
-    SCrypt,
-    PBKDF2_HKDF,
-    SCrypt_HKDF,
-    Default = SCrypt_HKDF,
-}
-
 public enum SymmetricAlgorithm : ubyte {
     AES128_GCM,
     AES128_CTR,
-    AES128_OFB,
     AES128_CFB,
     AES128_CBC,
     AES192_GCM,
     AES192_CTR,
-    AES192_OFB,
     AES192_CFB,
     AES192_CBC,
     AES256_GCM,
     AES256_CTR,
-    AES256_OFB,
     AES256_CFB,
     AES256_CBC,
     ChaCha20,
@@ -49,201 +32,107 @@ public enum SymmetricAlgorithm : ubyte {
     Default = AES256_GCM,
 }
 
-@safe private ushort getHeaderSize(ubyte headerVersion) {
-    if(headerVersion == 1) {
-        return 28;
-    } else {
-        throw new CryptographicException("Unsupported cryptographic header version.");
-    }
-}
-
-public immutable struct CryptoBlockHeader {
-    public immutable ubyte headerVersion;           // The version of the block header
-    public immutable SymmetricAlgorithm symmetric;  // The Symmetric algorithm
-    public immutable HashAlgorithm hash;            // The Hash algorithm
-    public immutable KdfAlgorithm kdf;              // The KDF algorithm
-    public immutable uint kdfIterations;            // The number of KDF iterations
-    public immutable ushort scryptMemory;           // The amount SCrypt memory to use
-    public immutable ushort scryptParallelism;      // The SCrypt parallelism
-
-    public immutable uint sectionCount;             // The total number of sections
-    public immutable uint sectionNumber;            // The current section number
-
-    public immutable uint additionalLength;         // The length of the additional data
-    public immutable uint encryptedLength;          // The length of the encrypted data
-
-    @safe public this(SymmetricAlgorithm symAlg, HashAlgorithm hashAlg, KdfAlgorithm kdfAlg, 
-        uint iterations, ushort memory, ushort parallelism,
-        uint sectionCount, uint sectionNumber, uint additionalLength, uint encryptedLength)
-    {
-        this.headerVersion = 1;
-        this.symmetric = symAlg;
-        this.hash = hashAlg;
-        this.kdf = kdfAlg;
-        this.kdfIterations = iterations;
-        this.scryptMemory = memory;
-        this.scryptParallelism = parallelism;
-        this.sectionCount = sectionCount;
-        this.sectionNumber = sectionNumber;
-        this.additionalLength = additionalLength;
-        this.encryptedLength = encryptedLength;
-    }
-
-    @trusted public this(const ubyte[] header) {
-        import std.bitmanip : read;
-        ubyte[] bytes = cast(ubyte[])header;
-
-        this.headerVersion = cast(immutable)bytes.read!ubyte();
-        this.symmetric = cast(immutable SymmetricAlgorithm)bytes.read!ubyte();
-        this.hash = cast(immutable HashAlgorithm)bytes.read!ubyte();
-        this.kdf = cast(immutable KdfAlgorithm)bytes.read!ubyte();
-
-        this.kdfIterations = cast(immutable)bytes.read!uint();
-        this.scryptMemory = cast(immutable)bytes.read!ushort();
-        this.scryptParallelism = cast(immutable)bytes.read!ushort();
-
-        this.sectionCount = cast(immutable)bytes.read!uint();
-        this.sectionNumber = cast(immutable)bytes.read!uint();
-
-        this.additionalLength = cast(immutable)bytes.read!uint();
-        this.encryptedLength = cast(immutable)bytes.read!uint();
-    }
-
-    @safe public @property size_t getBlockLength() {
-        const uint saltLen = getHashLength(this.hash);
-        const uint ivLen = getCipherIVLength(this.symmetric);
-        const uint authLen = getAuthLength(this.symmetric, this.hash);
-        return saltLen + ivLen + authLen + additionalLength + encryptedLength;
-    }
-
-    @safe public @property ushort getHeaderLength() {
-        return getHeaderSize(1);
-    }
-
-    @trusted private ubyte[] toBytes() {
-        import std.bitmanip : write;
-        ubyte[] header = new ubyte[28];
-        
-        header[0] = this.headerVersion;
-        header[1] = this.symmetric;
-        header[2] = this.hash;
-        header[3] = this.kdf;
-
-        header.write(this.kdfIterations, 4);
-        header.write(this.scryptMemory, 8);
-        header.write(this.scryptParallelism, 10);
-
-        header.write(this.sectionCount, 12);
-        header.write(this.sectionNumber, 16);
-
-        header.write(this.additionalLength, 20);
-        header.write(this.encryptedLength, 24);
-
-        return header;
-    }
-}
-
-private immutable struct CryptoBlock {
-    public immutable CryptoBlockHeader header;
-    public immutable ubyte[] salt;
+public immutable struct EncryptedData {
     public immutable ubyte[] iv;
-    public immutable ubyte[] auth;
-    public immutable ubyte[] additional;
-    public immutable ubyte[] encrypted;
+    public immutable ubyte[] cipherText;
+    public immutable ubyte[] authTag;
 
-    @trusted public this(SymmetricAlgorithm symAlg, HashAlgorithm hashAlg, KdfAlgorithm kdfAlg,
-        uint iterations, ushort memory, ushort parallelism, uint sectionCount, uint sectionNumber,
-        const ubyte[] salt, const ubyte[] iv, const ubyte[] auth, const ubyte[] additional, const ubyte[] encrypted)
-    {
-        this.header = CryptoBlockHeader(symAlg, hashAlg, kdfAlg, iterations, memory, parallelism, sectionCount, sectionNumber, cast(uint)additional.length, cast(uint)encrypted.length);
+    private immutable SymmetricAlgorithm algorithm;
+    private immutable HashAlgorithm hashAlgorithm;
 
-        this.salt = cast(immutable)salt;
-        this.iv = cast(immutable)iv;
-        this.auth = cast(immutable)auth;
-        this.additional = cast(immutable)additional;
-        this.encrypted = cast(immutable)encrypted;
+    @safe public this(const string encoded, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        this.algorithm = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
+        this(Base64.decode(encoded), getCipherIVLength(algorithm), getAuthLength(algorithm, hashAlgorithm), algorithm, hashAlgorithm);
     }
 
-    @trusted public this(immutable CryptoBlockHeader header, const ubyte[] data) {
-        ubyte[] bytes = cast(ubyte[])data;
-        this.header = header;
-        const uint saltLen = getHashLength(this.header.hash);
-        const uint ivLen = getCipherIVLength(this.header.symmetric);
-        const uint authLen = getAuthLength(this.header.symmetric, this.header.hash);
+    @trusted public this(const ubyte[] rawCiphertext, size_t ivLength, size_t authTagLength, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        if (rawCiphertext.length <= ivLength + authTagLength)
+            throw new CryptographicException("Incorrect ciphertext length");
 
-        this.salt = cast(immutable)bytes[0..saltLen];
-        bytes = bytes[saltLen..$];
-        this.iv = cast(immutable)bytes[0..ivLen];
-        bytes = bytes[ivLen..$];
-        this.auth = cast(immutable)bytes[0..authLen];
-        bytes = bytes[authLen..$];
-        this.additional = cast(immutable)bytes[0..header.additionalLength];
-        bytes = bytes[header.additionalLength..$];
-        this.encrypted = cast(immutable)bytes[0..header.encryptedLength];
+        this.algorithm = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
+
+        this.iv         = cast(immutable) rawCiphertext[0 .. ivLength];
+        this.cipherText = cast(immutable) rawCiphertext[ivLength .. $-authTagLength];
+        this.authTag    = cast(immutable) rawCiphertext[$-authTagLength .. $];
     }
 
-    @trusted private ubyte[] toBytes() {
-        import std.bitmanip : write;
+    @trusted public this(const ubyte[] cipherText, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+        this.iv            = cast(immutable) iv;
+        this.cipherText    = cast(immutable) cipherText;
+        this.authTag       = cast(immutable) authTag;
+        this.algorithm     = algorithm;
+        this.hashAlgorithm = hashAlgorithm;
+    }
 
-        OutBuffer buffer = new OutBuffer();
-        buffer.reserve(getHeaderSize(1) + this.header.getBlockLength());
-        buffer.write(this.header.toBytes());
-        buffer.write(salt);
-        buffer.write(iv);
-        buffer.write(auth);
-        buffer.write(additional);
-        buffer.write(encrypted);
-
-        return buffer.toBytes();
+    public string toString() {
+        return to!string(Base64.encode(iv ~ cipherText ~ authTag));
     }
 }
 
-@safe public ubyte[] encrypt(const ubyte[] key, const ubyte[] data, const ubyte[] additional) {
-    return encrypt_ex(key, data, additional, defaultChunkSize, SymmetricAlgorithm.Default, KdfAlgorithm.Default, defaultKdfIterations, defaultSCryptR, defaultSCryptP, HashAlgorithm.SHA2_384);
+public struct SymmetricKey {
+    package ubyte[] value;
+    package SymmetricAlgorithm algorithm;
+    @disable this();
+
+    public @property ubyte[] key() { return value; }
+
+    public string toString() {
+        return Base64.encode(value);
+    }
 }
 
-@safe public ubyte[] encrypt_ex(const ubyte[] key, const ubyte[] data, const ubyte[] additional, uint chunkSize, SymmetricAlgorithm symmetric, KdfAlgorithm kdf, uint n, ushort r, ushort p, HashAlgorithm hash) {
-    import std.math : floor;
-    const real tcc = data.length / chunkSize;
-    const ushort chunks = to!ushort(floor(tcc)+1);
-
-    CryptoBlock[] blocks;
-    size_t processed = 0;
-    size_t totalSize = additional.length;
-    for(ushort i = 0; i < chunks; i++) {
-        //Prepare data for encryption
-        const size_t chunkLen = (data.length-processed) >= chunkSize ? chunkSize : (data.length-processed);
-        const ubyte[] ad = (chunkLen < chunkSize) ? additional : null;
-        const ubyte[] ep = data[processed..processed+chunkLen];
-        ubyte[] iv = random(getCipherIVLength(symmetric));
-        ubyte[] auth = null;
-
-        //Get Derived Key
-        KdfResult derivedKey = deriveKey(key, null, symmetric, kdf, n, r, p, hash);
-
-        //Encrypt data
-        const ubyte[] result = encrypt_ex(symmetric, derivedKey.key, iv, ep, ad, auth);
-
-        //Authentiate data if the cipher is not an AEAD cipher
-        auth = !isAeadCipher(symmetric) ? hmac_ex(derivedKey.key, result, hash) : auth;
-
-        //Store results
-        blocks ~= CryptoBlock(symmetric, hash, kdf, n, r, p, chunks, i, derivedKey.salt, iv, auth, ad, result);
-        totalSize += (blocks[i].header.getHeaderLength() + blocks[i].header.getBlockLength());
-        processed += chunkLen;
-    }
-
-    //Write results to buffer
-    OutBuffer buffer = new OutBuffer();
-    buffer.reserve(totalSize);
-    foreach(CryptoBlock block; blocks) {
-        buffer.write(block.toBytes());
-    }
-
-    return buffer.toBytes();
+@safe public SymmetricKey generateSymmetricKey(SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default) {
+    SymmetricKey key = SymmetricKey.init;
+    key.value = random(getCipherKeyLength(algorithm));
+    key.algorithm = algorithm;
+    return key;
 }
 
-@trusted public ubyte[] encrypt_ex(SymmetricAlgorithm algorithm, const ubyte[] key, const ubyte[] iv, const ubyte[] data, const ubyte[] additional, out ubyte[] auth) {
+@safe public SymmetricKey generateSymmetricKey(const string password, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default, KdfAlgorithm kdf = KdfAlgorithm.Default) {
+    SymmetricKey key = SymmetricKey.init;
+    key.algorithm = algorithm;
+    if (kdf == KdfAlgorithm.SCrypt) {
+        key.value = scrypt_ex(password, null, getCipherKeyLength(algorithm));
+    } else if (kdf == KdfAlgorithm.PBKDF2) {
+        key.value = pbkdf2_ex(password, null, HashAlgorithm.Default, getCipherKeyLength(algorithm), defaultKdfIterations);
+    } else {
+        throw new CryptographicException("Specified KDF '" ~ to!string(kdf) ~ "' is not supported.");
+    }
+    return key;
+}
+
+@trusted public SymmetricKey initializeSymmetricKey(const ubyte[] bytes, SymmetricAlgorithm algorithm = SymmetricAlgorithm.Default) {
+    if (bytes.length != (getCipherKeyLength(algorithm))) {
+        throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
+    }
+    SymmetricKey key = SymmetricKey.init;
+    key.value = cast(ubyte[])bytes;
+    key.algorithm = algorithm;
+    return key;
+}
+
+pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, const ubyte[] salt, HashAlgorithm hash = HashAlgorithm.Default) {
+    return hkdf_ex(key, salt, string.init, bytes, hash);
+}
+
+@safe public EncryptedData encrypt(const SymmetricKey key, const ubyte[] data, const ubyte[] associatedData = null) {
+    ubyte[] iv = random(getCipherIVLength(key.algorithm));
+    ubyte[] derived = deriveKey(key.value, getCipherKeyLength(key.algorithm), iv);
+    ubyte[] authTag;
+    ubyte[] result = encrypt_ex(data, associatedData, derived, iv, authTag, key.algorithm);
+    return EncryptedData(result, iv, authTag, key.algorithm);
+}
+
+@trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
+    if (encryptionKey.length != getCipherKeyLength(algorithm)) {
+        throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
+    }
+    if (iv.length != getCipherIVLength(algorithm)) {
+        throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
+    }
+
     //Get the OpenSSL cipher context
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (ctx is null) {
@@ -256,26 +145,14 @@ private immutable struct CryptoBlock {
     }
 
     //Initialize the cipher context
-    if (EVP_EncryptInit_ex(ctx, getOpenSslCipher(algorithm), null, null, null) != 1) {
-        throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-    }
-
-    //Initialize the AEAD context
-    if (isAeadCipher(algorithm)) {
-        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, cast(int)iv.length, null) != 1) {
-            throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-        }
-    }
-
-    //Set the Key and IV
-    if (EVP_EncryptInit_ex(ctx, null, null, key.ptr, iv.ptr) != 1) {
+    if (EVP_EncryptInit_ex(ctx, getOpenSslCipher(algorithm), null, encryptionKey.ptr, iv.ptr) != 1) {
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
     //Write the additional data to the cipher context, if any
-    if (additional !is null && isAeadCipher(algorithm)) {
+    if (associatedData !is null && isAeadCipher(algorithm)) {
         int aadLen = 0;
-        if (EVP_EncryptUpdate(ctx, null, &aadLen, additional.ptr, cast(int)additional.length) != 1) {
+        if (EVP_EncryptUpdate(ctx, null, &aadLen, associatedData.ptr, cast(int)associatedData.length) != 1) {
             throw new CryptographicException("Unable to write bytes to cipher context.");
         }
     }
@@ -290,59 +167,46 @@ private immutable struct CryptoBlock {
     written += len;
 
     //Extract the complete ciphertext
-    if (EVP_EncryptFinal_ex(ctx, &output[written-1], &len) != 1) {
+    if (EVP_EncryptFinal_ex(ctx, &output[written], &len) != 1) {
         throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
     }
+
     written += len;
+    ubyte[] result = output[0..written];
 
     //Extract the auth tag
-    ubyte[] _auth = isAeadCipher(algorithm) ? new ubyte[getAuthLength(algorithm)] : null;
     if (isAeadCipher(algorithm)) {
+        ubyte[] _auth = new ubyte[getAuthLength(algorithm)];
         if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, getAuthLength(algorithm), _auth.ptr) != 1) {
             throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
         }
+        authTag = _auth;
+    } else {
+        authTag = hmac(iv, hash(result) ~ hash(associatedData));
     }
 
-    auth = _auth;
-    return output[0..written];
+    return result;
 }
 
-@trusted public ubyte[] decrypt(const ubyte[] key, const ubyte[] data, out ubyte[] additional) {
-    ubyte[] bytes = cast(ubyte[])data;
-    CryptoBlockHeader firstHeader = CryptoBlockHeader(bytes);
-    const uint totalSections = firstHeader.sectionCount;
+@safe public ubyte[] decrypt(const SymmetricKey key, const EncryptedData data, const ubyte[] associatedData = null) {
+    if (data.algorithm != key.algorithm)
+        throw new CryptographicException("Key and data algorithms don't match");
+    ubyte[] derived = deriveKey(key.value, getCipherKeyLength(key.algorithm), data.iv);
+    return decrypt_ex(data.cipherText, associatedData, derived, data.iv, data.authTag, key.algorithm);
+}
 
-    OutBuffer adBuffer = new OutBuffer();
-    OutBuffer buffer = new OutBuffer();
-    for(uint i = 0; i < totalSections; i++) {
-        //Extract block info
-        CryptoBlockHeader header = CryptoBlockHeader(bytes);
-        auto hdrLen = header.getHeaderLength();
-        auto blockLen = header.getBlockLength();
-        bytes = bytes[hdrLen..$];
-        CryptoBlock block = CryptoBlock(header, bytes[0..blockLen]);
-        bytes = bytes[blockLen..$];
-
-        //Derive block key and verify block if required
-        KdfResult derivedKey = deriveKey(key, block.salt, block.header.symmetric, block.header.kdf, block.header.kdfIterations, block.header.scryptMemory, block.header.scryptParallelism, block.header.hash);
-        ubyte[] auth = !isAeadCipher(block.header.symmetric) ? hmac_ex(derivedKey.key, block.encrypted, block.header.hash) : null;
-        if (auth !is null && !constantTimeEquality(block.auth, auth)) {
-            throw new CryptographicException("Block authentication failed!");
-        }
-
-        //Decrypt block
-        ubyte[] result = decrypt_ex(derivedKey.key, block.iv, block.encrypted, block.auth, block.additional, block.header.symmetric);
-
-        //Write results to buffers
-        adBuffer.write(cast(ubyte[])block.additional);
-        buffer.write(result);
+@trusted public ubyte[] decrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] iv, const ubyte[] authTag, SymmetricAlgorithm algorithm) {
+    if (encryptionKey.length != getCipherKeyLength(algorithm)) {
+        throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
+    }
+    if (iv.length != getCipherIVLength(algorithm)) {
+        throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
     }
 
-    additional = adBuffer.toBytes();
-    return buffer.toBytes();
-}
+    if (!isAeadCipher(algorithm) && !hmac_verify(authTag, iv, hash(data) ~ hash(associatedData))) {
+        throw new CryptographicException("Failed to verify the authTag.");
+    }
 
-@trusted public ubyte[] decrypt_ex(const ubyte[] key, const ubyte[] iv, const ubyte[] data, const ubyte[] auth, const ubyte[] additional, SymmetricAlgorithm algorithm) {
     //Get the OpenSSL cipher context
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (ctx is null) {
@@ -355,74 +219,41 @@ private immutable struct CryptoBlock {
     }
 
     //Initialize the cipher context
-    if (!EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, null, null)) {
-        throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-    }
-
-    //Initialize the AEAD context
-    if (isAeadCipher(algorithm)) {
-        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, cast(int)iv.length, null)) {
-            throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-        }
-    }
-
-    //Set the Key and IV
-    if (!EVP_DecryptInit_ex(ctx, null, null, key.ptr, iv.ptr)) {
+    if (!EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, encryptionKey.ptr, iv.ptr)) {
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
     //Write the additional data to the cipher context, if any
-    if (additional.length != 0 && isAeadCipher(algorithm)) {
+    if (associatedData.length != 0 && isAeadCipher(algorithm)) {
         int aadLen = 0;
-        if (!EVP_DecryptUpdate(ctx, null, &aadLen, additional.ptr, cast(int)additional.length)) {
+        if (!EVP_DecryptUpdate(ctx, null, &aadLen, associatedData.ptr, cast(int)associatedData.length)) {
             throw new CryptographicException("Unable to write bytes to cipher context.");
+        }
+    }
+
+    //Use the supplied tag to verify the message
+    if (isAeadCipher(algorithm)) {
+        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)authTag.length, (cast(ubyte[])authTag).ptr)) {
+            throw new CryptographicException("Unable to set the authentication tag on the cipher context.");
         }
     }
 
     //Write data to the cipher context
     int written = 0;
     int len = 0;
-    ubyte[] output = new ubyte[data.length];
+    ubyte[] output = new ubyte[data.length + 32];
     if (!EVP_DecryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length)) {
         throw new CryptographicException("Unable to write bytes to cipher context.");
     }
     written += len;
 
-    //Use the supplied tag to verify the message
-    if (isAeadCipher(algorithm)) {
-        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)auth.length, (cast(ubyte[])auth).ptr)) {
-            throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
-        }
-    }
-
     //Extract the complete plaintext
-    if (EVP_DecryptFinal_ex(ctx, &output[written-1], &len) <= 0) {
+    if (EVP_DecryptFinal_ex(ctx, &output[written], &len) <= 0) {
         throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
     }
     written += len;
 
     return output[0..written];
-}
-
-@trusted private KdfResult deriveKey(const ubyte[] key, const ubyte[] salt, SymmetricAlgorithm symmetric, KdfAlgorithm kdf, uint n, ushort r, ushort p, HashAlgorithm hash) {
-    ubyte[] derivedKey;
-    ubyte[] _salt = salt is null ? random(getHashLength(hash)) : cast(ubyte[])salt;
-
-    if (kdf == KdfAlgorithm.PBKDF2) {
-        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, getCipherKeyLength(symmetric), n);
-    }
-    if (kdf == KdfAlgorithm.PBKDF2_HKDF) {
-        derivedKey = pbkdf2_ex(to!string(key), _salt, hash, getCipherKeyLength(symmetric), n);
-        derivedKey = hkdf_ex(derivedKey, _salt, string.init, getCipherKeyLength(symmetric), hash);
-    }
-    if (kdf == KdfAlgorithm.SCrypt) {
-        derivedKey = scrypt_ex(key, _salt, n, r, p, maxSCryptMemory, getCipherKeyLength(symmetric));
-    }
-    if (kdf == KdfAlgorithm.SCrypt_HKDF) {
-        derivedKey = scrypt_ex(key, _salt, n, r, p, maxSCryptMemory, getCipherKeyLength(symmetric));
-        derivedKey = hkdf_ex(derivedKey, _salt, string.init, getCipherKeyLength(symmetric), hash);
-    }
-    return KdfResult(_salt, derivedKey);
 }
 
 @trusted package const(EVP_CIPHER*) getOpenSslCipher(SymmetricAlgorithm algo) {
@@ -436,9 +267,6 @@ private immutable struct CryptoBlock {
         case SymmetricAlgorithm.AES128_CFB: return EVP_aes_128_cfb();
         case SymmetricAlgorithm.AES192_CFB: return EVP_aes_192_cfb();
         case SymmetricAlgorithm.AES256_CFB: return EVP_aes_256_cfb();
-        case SymmetricAlgorithm.AES128_OFB: return EVP_aes_128_ofb();
-        case SymmetricAlgorithm.AES192_OFB: return EVP_aes_192_ofb();
-        case SymmetricAlgorithm.AES256_OFB: return EVP_aes_256_ofb();
         case SymmetricAlgorithm.AES128_CBC: return EVP_aes_128_cbc();
         case SymmetricAlgorithm.AES192_CBC: return EVP_aes_192_cbc();
         case SymmetricAlgorithm.AES256_CBC: return EVP_aes_256_cbc();
@@ -469,9 +297,6 @@ private immutable struct CryptoBlock {
         case SymmetricAlgorithm.AES128_CFB: return 16;
         case SymmetricAlgorithm.AES192_CFB: return 24;
         case SymmetricAlgorithm.AES256_CFB: return 32;
-        case SymmetricAlgorithm.AES128_OFB: return 16;
-        case SymmetricAlgorithm.AES192_OFB: return 24;
-        case SymmetricAlgorithm.AES256_OFB: return 32;
         case SymmetricAlgorithm.AES128_CBC: return 16;
         case SymmetricAlgorithm.AES192_CBC: return 24;
         case SymmetricAlgorithm.AES256_CBC: return 32;
@@ -492,7 +317,7 @@ private immutable struct CryptoBlock {
     }
 }
 
-@safe package uint getAuthLength(SymmetricAlgorithm symmetric, HashAlgorithm hash = HashAlgorithm.None) {
+@safe package uint getAuthLength(SymmetricAlgorithm symmetric, HashAlgorithm hash = HashAlgorithm.Default) {
     switch(symmetric) {
         case SymmetricAlgorithm.AES128_GCM: return 16;
         case SymmetricAlgorithm.AES192_GCM: return 16;
@@ -506,36 +331,68 @@ unittest
 {
     import std.digest;
     import std.stdio;
-    immutable string input = "The quick brown fox jumps over the lazy dog.";
-    immutable ubyte[32] key = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
-                                0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
+
+    ubyte[] input = cast(ubyte[])"The quick brown fox jumps over the lazy dog.";
+    SymmetricKey key = initializeSymmetricKey([ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
+                                                0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ]);
+
+    SymmetricKey generateTest = generateSymmetricKey();
+	assert(generateTest.value.length == 32);
+    SymmetricKey passwordTest = generateSymmetricKey("Test Password");
+    writeln("Password Key: ", toHexString!(LetterCase.lower)(passwordTest.value));
+	assert(toHexString!(LetterCase.lower)(passwordTest.value) == "76ae6c580be5e707a5cef313d2161899cd596c8c635671c9904602f8312cca34");
 
     writeln("Testing Encryption (No Additional Data)");
-    ubyte[] enc = encrypt(key, cast(ubyte[])input, null);
-    writeln("Encryption Input: ", input);
-    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
+    writeln("Encryption Input: ", cast(string)input);
+    EncryptedData enc = encrypt(key, input);
+    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc.cipherText));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc.authTag));
 
     writeln("Testing Decryption (No Additional Data)");
-    ubyte[] ad = null;
-    ubyte[] dec = decrypt(key, enc, ad);
-    writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
+    writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc.cipherText));
+    ubyte[] dec = decrypt(key, enc);
     writeln("Decryption Output: ", cast(string)dec);
 
-    assert(ad.length == 0);
-    assert((cast(string)dec) == input);
+    assert((cast(string)dec) == cast(string)input);
+
+    string encoded = enc.toString();
+    writeln("Base64 Encoded: ", encoded);
+    EncryptedData test = EncryptedData(encoded);
+    ubyte[] eddec = decrypt(key, test);
+    writeln("Decryption Output:  ", cast(string)eddec);
+    assert((cast(string)eddec) == cast(string)input);
+
+    ubyte[] ad = cast(ubyte[])"Associated Data";
 
     writeln("Testing Encryption (With Additional Data)");
-    enc = encrypt(key, cast(ubyte[])input, cast(ubyte[])input);
-    writeln("Encryption Input: ", input);
-    writeln("Encryption AD: ", input);
-    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc));
+    writeln("Encryption Input: ", cast(string)input);
+    writeln("Encryption AD: ", cast(string)ad);
+    EncryptedData enc2 = encrypt(key, input, ad);
+    writeln("Encryption Output: ", toHexString!(LetterCase.lower)(enc2.cipherText));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc2.authTag));
 
     writeln("Testing Decryption (With Additional Data)");
-    dec = decrypt(key, enc, ad);
-    writeln("Decryption Input: ", toHexString!(LetterCase.lower)(enc));
+    writeln("Decryption Input:  ", toHexString!(LetterCase.lower)(enc2.cipherText));
     writeln("Decryption AD: ", cast(string)ad);
-    writeln("Decryption Output: ", cast(string)dec);
+    ubyte[] dec2 = decrypt(key, enc2, ad);
+    writeln("Decryption Output: ", cast(string)dec2);
 
-    assert((cast(string)ad) == input);
-    assert((cast(string)dec) == input);
+    assert((cast(string)dec2) == cast(string)input);
+
+    writeln("Testing Non-AEAD Encryption (With Additional Data)");
+    writeln("Encryption Input: ", cast(string)input);
+    writeln("Encryption AD: ", cast(string)ad);
+    SymmetricKey nonAeadKey = generateSymmetricKey(SymmetricAlgorithm.AES256_CBC);
+    EncryptedData enc3 = encrypt(nonAeadKey, input, ad);
+    writeln("Encryption Output: ", enc3);
+    writeln("IV: ", toHexString!(LetterCase.lower)(enc3.iv));
+    writeln("AuthTag: ", toHexString!(LetterCase.lower)(enc3.authTag));
+
+    writeln("Testing Non-AEAD Decryption (With Additional Data)");
+    writeln("Decryption Input:  ", enc3);
+    writeln("Decryption AD: ", cast(string)ad);
+    ubyte[] dec3 = decrypt(nonAeadKey, enc3, ad);
+    writeln("Decryption Output: ", cast(string)dec3);
+
+    assert((cast(string)dec3) == cast(string)input);
 }
