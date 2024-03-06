@@ -21,7 +21,7 @@ SecureD is designed to support a wide-variety of uses. However, SecureD is expli
 Safe by Design:
 Use only safe algorithms with safe modes. Make conservative choices in the implementation.
 
-Do no Reimplement Cryptography Algorithms:
+Do Not Reimplement Cryptography Algorithms:
 Use industry standard libraries instead. SecureD is based on OpenSSL. Botan support was removed in V2 of SecureD due to the extensiveness of the rewrite that SecureD underwent. If someone is willing to update with new implementations they will be considered for inclusion.
 
 Minimal Code:
@@ -33,12 +33,12 @@ All API's are unittested using D's built in unittests. Any developer can verify 
 Algorithms
 
 - Hash + HMAC:
-  - SHA2: 224, 256, 384, 512, 512/224, 512/256
+  - SHA2: 256, 384, 512, 512/224, 512/256
   - SHA3: 224, 256, 384, 512
 - Symmetric:
   - Algorithms: AES (128/192/256), ChaCha20
   - Stream Modes: GCM, CTR, Poly1305 (ChaCha20 only)
-  - Block Modes: OFB, CFB, CBC (PKCS7 Padding Only)
+  - Block Modes: CFB, CBC (PKCS7 Padding Only)
 - KDF:              PBKDF2, HKDF, SCrypt
 - Asymmetric:       ECC: P256, P384, P521 (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
 - Asymmetric:       RSA-AES Seal/Open, RSA Encrypt/Decrypt, and RSA Sign/Verify

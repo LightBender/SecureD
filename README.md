@@ -21,7 +21,7 @@ SecureD is designed to support a wide-variety of uses. However, SecureD is expli
 ### Safe by Design
 Use only safe algorithms with safe modes. Make conservative choices in the implementation.
 
-### Do no Re-implement Cryptography Algorithms
+### Do Not Re-implement Cryptography Algorithms
 Use industry standard libraries instead. SecureD is based on OpenSSL. Botan support was removed in V2 of SecureD due to the extensiveness of the rewrite that SecureD underwent. If someone is willing to update with new implementations they will be considered for inclusion.
 
 ### Minimal Code
@@ -33,12 +33,12 @@ All API's are unittested using D's built in unittests. Any developer can verify 
 ## Algorithms
 
 - Hash + HMAC:
-  - SHA2: 224, 256, 384, 512, 512/224, 512/256
+  - SHA2: 256, 384, 512, 512/224, 512/256
   - SHA3: 224, 256, 384, 512
 - Symmetric:
   - Algorithms: AES (128/192/256), ChaCha20
   - Stream Modes: GCM, CTR, Poly1305 (ChaCha20 only)
-  - Block Modes: OFB, CFB, CBC (PKCS7 Padding Only)
+  - Block Modes: CFB, CBC (PKCS7 Padding Only)
 - KDF:              PBKDF2, HKDF, SCrypt
 - Asymmetric:       ECC: P256, P384, P521 - (Key Derivation + Sign/Verify with SHA2-384 or SHA2-256)
 - Asymmetric:       RSA-AES Seal/Open, RSA Encrypt/Decrypt, and RSA Sign/Verify
@@ -63,10 +63,10 @@ ubyte[48] key = [0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC
 ubyte[] data = cast(ubyte[])"The quick brown fox jumps over the lazy dog.";
 string filePath = "/usr/local/bin/dmd";
 
-ubyte[] result1 = hash(key, data);
-ubyte[] result2 = hash(key, filePath);
+ubyte[] result1 = hash(data);
+ubyte[] result2 = hash_ex(filePath, HashAlgorithm.SHA3_384);
 ubyte[] result3 = hmac(key, data);
-ubyte[] result4 = hmac(key, filePath);
+ubyte[] result4 = hmac_ex(key, filePath, HashAlgorithm.SHA3_384);
 ```
 
 ### PBKDF2
@@ -80,7 +80,8 @@ string password = "Test";
 uint iterations = 25000; //Defaut value
 uint outputLength = 48; //Default value, must be 48 bytes or less
 
-ubyte[] key = pbkdf2(key, password, iterations, outputLength);
+KdfResult derived = pbkdf2(password);
+pbkdf2_verify(derived.key, derived.salt, password);
 ```
 
 ### Encryption/Decryption
@@ -98,9 +99,10 @@ ubyte[48] key = [0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC
                  0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF ];
 ubyte[] data = cast(ubyte[])"The quick brown fox jumps over the lazy dog.";
 
-ubyte[] enc = encrypt(key, data, null);
+SymmetricKey skey = initializeSymmetricKey(key);
+EncryptedData enc = encrypt(skey, data);
 //Note that decrypt performs a validation and will throw an exception if the validation fails.
-ubyte[] dec = decrypt(key, enc, null);
+ubyte[] dec = decrypt(skey, enc);
 ```
 
 ### ECC Key Derivation
