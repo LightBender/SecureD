@@ -6,14 +6,21 @@ import std.typecons;
 import std.format;
 import std.string;
 
-import deimos.openssl.evp;
-import deimos.openssl.kdf;
-import secured.openssl;
-
 import secured.hash;
+import secured.provider;
 import secured.random;
 import secured.symmetric;
 import secured.util;
+
+static if (usesOpenSSL) {
+    import secured.system.openssl : pbkdf2_impl_openssl, hkdf_impl_openssl, scrypt_impl_openssl;
+}
+static if (activeProvider == Provider.CNG) {
+    import secured.system.windows : pbkdf2_impl_cng, cngSupportsHash;
+}
+static if (activeProvider == Provider.CommonCrypto) {
+    import secured.system.macos : pbkdf2_impl_commoncrypto, commonCryptoSupportsHash;
+}
 
 public enum uint defaultKdfIterations = 1_048_576;
 public enum ushort defaultSCryptR = 8;
@@ -143,6 +150,7 @@ public enum VerifyPasswordResult
 }
 
 unittest {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -167,6 +175,7 @@ unittest {
     writeln("Encoded: ", pbkdf2Test.toString());
     verifyResult = verifyPassword("TestPassword!@#$%", pbkdf2Test, salt);
     assert (verifyResult == VerifyPasswordResult.Success);
+    });
 }
 
 public struct KdfResult {
@@ -186,12 +195,34 @@ public struct KdfResult {
     return constantTimeEquality(key, test);
 }
 
+package(secured) string unsupportedKdfMessage(string name) {
+    return "KDF '" ~ name ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
+}
+
 @trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
-    ubyte[] output = new ubyte[outputLen];
-    if(PKCS5_PBKDF2_HMAC(password.ptr, cast(int)password.length, salt.ptr, cast(int)salt.length, iterations, getOpenSSLHashAlgorithm(func), outputLen, output.ptr) == 0) {
-        throw new CryptographicException("Unable to execute PBKDF2 hash function.");
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        return pbkdf2_impl_openssl(password, salt, func, outputLen, iterations);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsHash(func)) {
+            return pbkdf2_impl_cng(password, salt, func, outputLen, iterations);
+        } else static if (polyfillEnabled) {
+            return pbkdf2_impl_openssl(password, salt, func, outputLen, iterations);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedKdfMessage("PBKDF2"));
+        }
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsHash(func)) {
+            return pbkdf2_impl_commoncrypto(password, salt, func, outputLen, iterations);
+        } else static if (polyfillEnabled) {
+            return pbkdf2_impl_openssl(password, salt, func, outputLen, iterations);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedKdfMessage("PBKDF2"));
+        }
+    } else static if (polyfillEnabled) {
+        return pbkdf2_impl_openssl(password, salt, func, outputLen, iterations);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedKdfMessage("PBKDF2"));
     }
-    return output;
 }
 
 @safe public bool pbkdf2_verify_ex(const ubyte[] test, string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
@@ -201,6 +232,7 @@ public struct KdfResult {
 
 unittest
 {
+    skipIfUnsupported({
     import std.datetime.stopwatch;
     import std.digest;
     import std.stdio;
@@ -225,10 +257,12 @@ unittest
     ubyte[] key = pbkdf2_ex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, HashAlgorithm.SHA2_384, 64, 100000);
     assert(pbkdf2_verify_ex(key, "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", salt, HashAlgorithm.SHA2_384, 64, 100000));
     writeln(toHexString!(LetterCase.lower)(key));
+    });
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -249,10 +283,12 @@ unittest
     assert(toHexString!(LetterCase.lower)(vec1) == "b0ddf56b90903d638ec8d07a4205ba2bcfa944955d553e1ef3f91cba84e8e3bde9db7c8ccf14df26f8305fc8634572f9");
     assert(toHexString!(LetterCase.lower)(vec2) == "b0a5e09a38bee3eb2b84d477d5259ef7bebf0e48d9512178f7e26cc330278ff45417d47d84db06a12b8ea49377a7c7cb");
     assert(toHexString!(LetterCase.lower)(vec3) == "d1aacafea3a9fdf3ee6236b1b45527974ea01539b4a7cc493bba56e15e14d520b2834d7bf22b83bb5c21c4bccb423be2");
+    });
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -273,10 +309,12 @@ unittest
     assert(toHexString!(LetterCase.lower)(vec1) == "babdcbbf4ff89367ed223d2edd06ef5473ac9cdc827783ed0b4b5eafd9e4097beb2ef66d6fc92d24dbf4b86aa51b4a0f");
     assert(toHexString!(LetterCase.lower)(vec2) == "8894348ccea06d79f80382ae7d4434c0f2ef41f871d936604f426518ab23bde4410fddce6dad943c95de75dbece9b54a");
     assert(toHexString!(LetterCase.lower)(vec3) == "fba55e91818c35b1e4cc753fbd01a6cd138c49da472b58b2d7c4860ba39a3dd9032f8f641aadcd74a819361ed27c9a0f");
+    });
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -297,6 +335,7 @@ unittest
     assert(toHexString!(LetterCase.lower)(vec1) == "b0ddf56b90903d638ec8d07a4205ba2bcfa944955d553e1ef3f91cba84e8e3bd");
     assert(toHexString!(LetterCase.lower)(vec2) == "b0a5e09a38bee3eb2b84d477d5259ef7bebf0e48d9512178f7e26cc330278ff4");
     assert(toHexString!(LetterCase.lower)(vec3) == "d1aacafea3a9fdf3ee6236b1b45527974ea01539b4a7cc493bba56e15e14d520");
+    });
 }
 
 @safe public KdfResult hkdf(const SymmetricKey key) {
@@ -315,43 +354,16 @@ unittest
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
 
-    EVP_KDF *kdf;
-    EVP_KDF_CTX *kctx = null;
-    ubyte[] derived = new ubyte[outputLen];
-    ossl_param_st[5] params;
-
-    /* Find and allocate a context for the HKDF algorithm */
-    if ((kdf = EVP_KDF_fetch(null, "hkdf", null)) == null) {
-        throw new CryptographicException("Unable to create HKDF function.");
+    static if (usesOpenSSL) {
+        return hkdf_impl_openssl(key, salt, info, outputLen, func);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedKdfMessage("HKDF"));
     }
-    kctx = EVP_KDF_CTX_new(kdf);
-    scope(exit) {
-        if (kctx !is null) {
-            EVP_KDF_CTX_free(kctx);
-        }
-    }
-
-    /* Build up the parameters for the derivation */
-    string hashName = getOpenSSLHashAlgorithmString(func);
-    params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)hashName.toStringz(), hashName.length+1);
-    params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt, salt.length);
-    params[2] = OSSL_PARAM_construct_octet_string("key".toStringz(), cast(void*)key, key.length);
-    params[3] = OSSL_PARAM_construct_octet_string("info".toStringz(), cast(void*)info, info.length);
-    params[4] = OSSL_PARAM_construct_end();
-    if (EVP_KDF_CTX_set_params(kctx, params.ptr) <= 0) {
-        throw new CryptographicException("Unable to set the HKDF parameters.");
-    }
-
-    /* Do the derivation */
-    if (EVP_KDF_derive(kctx, derived.ptr, outputLen, null) <= 0) {
-        throw new CryptographicException("Unable to generate the requested key material.");
-    }
-
-    return derived;
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -369,10 +381,12 @@ unittest
 
     assert(toHexString!(LetterCase.lower)(vec2) == "65e464a5d7026678a3af78bf0282592472f85ccd7d1040e2dea5cea9218276a960367d418154a1e95019182a3c857286860aa0711955829e896b5bcdb1224794");
     assert(toHexString!(LetterCase.lower)(vec3) == "12a82466f85ead03f50bb502475b47ec50e7224a90f0219955bf09846ed72791206f6e713a529a0082bf7229093f2b4e6c6b467119518a2579a5b091ebe8ba12");
+    });
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -390,6 +404,7 @@ unittest
 
     assert(toHexString!(LetterCase.lower)(vec2) == "41999e49a273f7f1367c7b3c7bd80d56fa27307cdfdf0274c022a0185080ddaa36410a93098f325785e5c27c406df535c91cc47096dc846d5c1dea671a40f944");
     assert(toHexString!(LetterCase.lower)(vec3) == "15addd263fdab613056a7a82804c1d1c158ea901424d277c25407c15be4b7aa8cad52251de18b3151145035e94c8f360517bda7912d2249f80c9662c1a1cd345");
+    });
 }
 
 @safe public KdfResult scrypt(string password) {
@@ -416,17 +431,16 @@ unittest
 }
 
 @trusted public ubyte[] scrypt_ex(const ubyte[] password, const ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, size_t length) {
-    ubyte[] hash = new ubyte[length];
-
-    if (EVP_PBE_scrypt((cast(char[])password).ptr, password.length, salt.ptr, salt.length, n, r, p, maxMemory, hash.ptr, length) <= 0) {
-        throw new CryptographicException("Unable to calculate SCrypt hash.");
+    static if (usesOpenSSL) {
+        return scrypt_impl_openssl(password, salt, n, r, p, maxMemory, length);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedKdfMessage("SCrypt"));
     }
-
-    return hash;
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -444,4 +458,5 @@ unittest
 
     assert(toHexString!(LetterCase.lower)(vec2) == "134fca5087e04c2a79e0ea2c793660f19d466db74a069e1f2e4da2b177d51402501bd39ffc592b9419ec0280cc17dca7af8df54f836179d69a4b9e9f6b9467fd");
     assert(toHexString!(LetterCase.lower)(vec3) == "45397ec370eb31f3155ad162d83ec165ff8e363bc4e03c1c61c5a31ad17d0dac51d9e8911f32e9b588adf284a9de24561483dbaf0ea519b6a29ecae77eab5b90");
+    });
 }

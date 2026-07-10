@@ -2,7 +2,7 @@ module secured.util;
 
 import std.stdio;
 
-import secured.openssl;
+import secured.provider;
 
 public enum uint FILE_BUFFER_SIZE = 32768;
 
@@ -12,11 +12,46 @@ public enum uint FILE_BUFFER_SIZE = 32768;
     {
         super(message);
         debug {
-        while(ERR_peek_error() != 0) {
-            char[] buf = new char[512];
-            ERR_error_string_n(ERR_get_error(), buf.ptr, 512);
-            writeln(buf);
+            static if (usesOpenSSL) {
+                import secured.bindings.openssl : ERR_peek_error, ERR_get_error, ERR_error_string_n;
+                while(ERR_peek_error() != 0) {
+                    char[] buf = new char[512];
+                    ERR_error_string_n(ERR_get_error(), buf.ptr, 512);
+                    writeln(buf);
+                }
+            }
         }
+    }
+}
+
+/*
+ * Thrown when a requested algorithm is not supported by the active cryptographic
+ * provider and the polyfill configuration is not enabled. It derives from
+ * CryptographicException so that existing catch(CryptographicException) handlers
+ * continue to behave as before.
+ */
+@trusted public class AlgorithmNotSupportedException : CryptographicException
+{
+    this(string message)
+    {
+        super(message);
+    }
+}
+
+version (unittest) {
+    /*
+     * Test helper: runs a unittest body and, if the active provider does not
+     * support a requested algorithm (and the polyfill is disabled), prints a
+     * skip notice instead of failing. This is the only allowed modification to
+     * the unittests: it lets the full suite run under any provider configuration
+     * while clearly reporting algorithms that are unavailable in that build.
+     */
+    package void skipIfUnsupported(scope void delegate() test, string file = __FILE__, size_t line = __LINE__) {
+        import std.stdio : writeln;
+        try {
+            test();
+        } catch (AlgorithmNotSupportedException e) {
+            writeln("SKIP [", file, ":", line, "] algorithm unsupported in this configuration: ", e.msg);
         }
     }
 }

@@ -22,7 +22,7 @@ SecureD is designed to support a wide-variety of uses. However, SecureD is expli
 Use only safe algorithms with safe modes. Make conservative choices in the implementation.
 
 ### Do Not Re-implement Cryptography Algorithms
-Use industry standard libraries instead. SecureD is based on OpenSSL. Botan support was removed in V2 of SecureD due to the extensiveness of the rewrite that SecureD underwent. If someone is willing to update with new implementations they will be considered for inclusion.
+Use industry standard libraries instead. SecureD delegates every cryptographic operation to the cryptographic provider supplied by the host operating system or a well-known industry library — it never implements primitives itself. By default it uses the OS-native provider (Windows CNG, Apple CommonCrypto, or OpenSSL on Linux/FreeBSD) and can also target LibreSSL or BoringSSL. See [Cryptographic Providers](#cryptographic-providers) for details. Botan support was removed in V2 of SecureD due to the extensiveness of the rewrite that SecureD underwent. If someone is willing to update with new implementations they will be considered for inclusion.
 
 ### Minimal Code
 Keep the code to a minimum. This ensures high-maintainability and facilitates understanding of the code.
@@ -45,11 +45,66 @@ All API's are unittested using D's built in unittests. Any developer can verify 
 - RNG:              System RNG on POSIX and Windows
 - Other:            Constant Time Equality
 
+## Cryptographic Providers
+
+SecureD does not implement any cryptographic primitives itself. Instead it dispatches each operation to a cryptographic **provider** that is selected at build time. The public API acts purely as an algorithm-availability detector and forwards to the private implementation for the selected provider.
+
+By default SecureD uses the **OS-native** provider:
+
+| Platform         | Default provider      |
+|------------------|-----------------------|
+| Windows          | CNG (bcrypt/ncrypt)   |
+| macOS            | CommonCrypto + Security framework |
+| Linux / FreeBSD  | OpenSSL               |
+
+### Build configurations
+
+Each provider has a corresponding dub configuration. Select one with `dub build --config=<name>` or `dub test --config=<name>`:
+
+| Configuration   | Provider                                     |
+|-----------------|----------------------------------------------|
+| `library`       | OS-native (default)                          |
+| `openssl`       | OpenSSL                                      |
+| `libressl`      | LibreSSL                                     |
+| `boringssl`     | BoringSSL                                    |
+| `cng`           | Windows CNG                                  |
+| `commoncrypto`  | Apple CommonCrypto                           |
+| `polyfill`      | OS-native provider + OpenSSL fallback        |
+
+### The polyfill configuration
+
+Not every provider supports every algorithm. The `polyfill` configuration keeps the OS-native provider as the primary backend and uses OpenSSL to fill in any algorithm the native provider cannot supply. By default (without polyfill) the native provider is used exclusively.
+
+If an unsupported algorithm is requested while the polyfill is disabled, SecureD emits a compile-time error where the incompatibility is known at compile time, and otherwise throws a `CryptographicException` (specifically an `AlgorithmNotSupportedException`) at runtime. Some algorithms — for example SHA-3 on Windows CNG — depend on the OS version and are detected at runtime; if the running OS does not provide them a `CryptographicException` is thrown.
+
+### Provider capability matrix
+
+✅ native &middot; ⚠️ runtime/version dependent &middot; ↩ provided by the polyfill
+
+| Algorithm                    | OpenSSL / LibreSSL / BoringSSL | CNG (Windows) | CommonCrypto (macOS) |
+|------------------------------|--------------------------------|---------------|----------------------|
+| SHA-2 256 / 384 / 512        | ✅                             | ✅            | ✅                  |
+| SHA-2 512/224, 512/256       | ✅                             | ↩             | ↩                   |
+| SHA-3 224/256/384/512        | ✅ (⚠️ BoringSSL/LibreSSL)     | ⚠️ / ↩        | ↩                  |
+| HMAC (supported hashes)      | ✅                             | ✅            | ✅                  |
+| AES-GCM / AES-CBC            | ✅                             | ✅            | ✅                  |
+| AES-CTR / AES-CFB            | ✅                             | ↩             | ✅                  |
+| ChaCha20 / ChaCha20-Poly1305 | ✅                             | ↩             | ↩                   |
+| PBKDF2                       | ✅                             | ✅            | ✅                  |
+| HKDF                         | ✅                             | ↩             | ↩                   |
+| SCrypt                       | ✅ (↩ BoringSSL)               | ↩             | ↩                  |
+| ECC (P-256 / 384 / 521)      | ✅                             | ✅            | ✅ †                |
+| RSA (seal / OAEP / sign)     | ✅                             | ✅            | ✅ †                |
+
+† On macOS, RSA and ECC are provided by the **Security framework** (`SecKey`), not CommonCrypto, whose asymmetric interfaces are private SPI. On Windows, ECC uses CNG's ECDSA / ECDH providers. `EccCurve.P256`, `P384` and `P521` are the NIST prime curves (P-256, P-384 — the default — and P-521) on every backend.
+
+To run the complete test suite on a platform whose native provider does not cover every algorithm, use the `polyfill` configuration (for example `dub test --config=polyfill`). When run against a native-only configuration, tests for algorithms the provider does not support print a skip notice instead of failing.
+
 ## Versioning
 
 SecureD follows SemVer. This means that the API surface and cryptographic implementations may be different between major versions. Minor and Point versions are cryptographically compatible. Minor versions may add new cryptographic algorithms to existing capabilities. Newer versions will provide an upgrade path from older versions where feasible.
 
-SecureD is built against OpenSSL 3.0.12 or greater.
+When an OpenSSL-family provider is used (OpenSSL, LibreSSL, BoringSSL, or the polyfill), SecureD is built against OpenSSL 3.0.12 (or a compatible LibreSSL/BoringSSL) or greater. The OpenSSL API declarations SecureD requires are vendored directly into the library (see `source/secured/bindings/openssl.d`), so there is no external Deimos binding dependency.
 
 ## Examples
 

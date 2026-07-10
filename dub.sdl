@@ -4,12 +4,69 @@ authors "Adam Wilson" "Cédric Picard" "Adam Williams" "Georgi Dimitrov" "Nathan
 copyright "Copyright © 2016-2023, Adam Wilson"
 license "BSL-1.0"
 
-lflags "-L/usr/local/lib/" platform="posix"
-lflags "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib" platform="windows"
-libs "libcrypto" "libssl"
-libs "advapi32" platform="windows"
-
-dependency "openssl" version="~>3.3.3"
-versions "DeimosOpenSSL_3_0"
 targetType "library"
 targetPath "bin/"
+
+// SecureD vendors the OpenSSL declarations it needs (see source/secured/bindings/openssl.d),
+// so there is no external Deimos dependency. libcrypto/libssl are only linked by the
+// configurations that use the OpenSSL provider or the polyfill.
+
+// advapi32 provides the Windows system RNG (CryptGenRandom) used on all Windows builds.
+libs "advapi32" platform="windows"
+lflags "-L/usr/local/lib/" platform="posix"
+
+// ---------------------------------------------------------------------------
+// Provider configurations
+//
+// Default (library): use the OS-native provider - CNG on Windows, CommonCrypto
+// on macOS, OpenSSL on Linux/FreeBSD. Explicit provider configurations force a
+// specific backend. The "polyfill" configuration enables OpenSSL to fill in any
+// algorithm the native provider cannot supply.
+// ---------------------------------------------------------------------------
+
+configuration "library" {
+    // OS-native provider (selected automatically in secured.provider).
+    libs "ssl" "crypto" platform="posix"       // OpenSSL is the native provider on Linux/FreeBSD
+    libs "bcrypt" "ncrypt" platform="windows"  // CNG is the native provider on Windows
+    // macOS: CommonCrypto is part of libSystem; the Security framework provides native RSA.
+    lflags "-framework" "Security" "-framework" "CoreFoundation" platform="osx"
+}
+
+configuration "openssl" {
+    versions "Secured_OpenSSL"
+    libs "ssl" "crypto" platform="posix"
+    libs "libcrypto" "libssl" platform="windows"
+    lflags "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib\\VC\\x64\\MD" platform="windows"
+}
+
+configuration "polyfill" {
+    // OS-native provider + OpenSSL polyfill for unsupported algorithms.
+    versions "Secured_Polyfill"
+    libs "ssl" "crypto" platform="posix"
+    libs "libcrypto" "libssl" "bcrypt" "ncrypt" platform="windows"
+    lflags "/LIBPATH:C:\\Program Files\\OpenSSL-Win64\\lib\\VC\\x64\\MD" platform="windows"
+    lflags "-framework" "Security" "-framework" "CoreFoundation" platform="osx"
+}
+
+configuration "cng" {
+    platforms "windows"
+    versions "Secured_CNG"
+    libs "bcrypt" "ncrypt" platform="windows"
+}
+
+configuration "commoncrypto" {
+    platforms "osx"
+    versions "Secured_CommonCrypto"
+    lflags "-framework" "Security" "-framework" "CoreFoundation" platform="osx"
+}
+
+configuration "libressl" {
+    versions "Secured_LibreSSL"
+    libs "ssl" "crypto"
+}
+
+configuration "boringssl" {
+    versions "Secured_BoringSSL"
+    libs "ssl" "crypto"
+}
+

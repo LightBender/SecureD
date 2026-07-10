@@ -1,16 +1,8 @@
 module secured.ecc;
 
 import std.stdio;
-import std.string;
 
-import deimos.openssl.evp;
-import deimos.openssl.rand;
-import deimos.openssl.pem;
-import deimos.openssl.bio;
-
-import secured.hash;
-import secured.kdf;
-import secured.random;
+import secured.provider;
 import secured.util;
 
 public enum EccCurve
@@ -20,210 +12,73 @@ public enum EccCurve
     P521,
 }
 
+/*
+ * The public EllipticCurve class is a provider-agnostic dispatcher. It holds an
+ * opaque, provider-specific key context (EccKey) and forwards each operation to
+ * the package-private free functions implemented by the active provider's system
+ * module (OpenSSL, CNG or the Security framework).
+ */
+static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+    import secured.system.openssl : EccKey, eccGenerate, eccLoadPrivateKey, eccLoadPublicKey, eccFree,
+        eccDerive, eccSign, eccVerify, eccGetPublicKey, eccGetPrivateKey;
+} else static if (activeProvider == Provider.CNG) {
+    import secured.system.windows : EccKey, eccGenerate, eccLoadPrivateKey, eccLoadPublicKey, eccFree,
+        eccDerive, eccSign, eccVerify, eccGetPublicKey, eccGetPrivateKey;
+} else static if (activeProvider == Provider.CommonCrypto) {
+    import secured.system.macos : EccKey, eccGenerate, eccLoadPrivateKey, eccLoadPublicKey, eccFree,
+        eccDerive, eccSign, eccVerify, eccGetPublicKey, eccGetPrivateKey;
+}
+
 @trusted:
 
 public class EllipticCurve
 {
-    private EVP_PKEY_CTX* paramsctx;
-    private EVP_PKEY* params;
-    private EVP_PKEY_CTX* keyctx;
-    private EVP_PKEY* key;
+    private EccKey key;
 
     private bool _hasPrivateKey;
     public @property bool hasPrivateKey() { return _hasPrivateKey; }
 
     public this(EccCurve curve = EccCurve.P384)
     {
-        //Reseed the OpenSSL RNG every time we create a new ECC Key to ensure that the result is truely random in threading/forking scenarios.
-        ubyte[] seedbuf = random(32);
-        RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
-
-        //Generate the key parameters
-        paramsctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, null);
-        if (paramsctx is null) {
-            throw new CryptographicException("Cannot get an OpenSSL public key context.");
-        }
-        if (EVP_PKEY_paramgen_init(paramsctx) < 1) {
-            throw new CryptographicException("Cannot initialize the OpenSSL public key context.");
-        }
-        if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(paramsctx, getOpenSSLCurveId(curve)) < 1) {
-            throw new CryptographicException("Cannot set the requested curve.");
-        }
-        if (EVP_PKEY_paramgen(paramsctx, &params) < 1) {
-            throw new CryptographicException("Unable to generate the key parameters.");
-        }
-
-        //Generate the public and private keys
-        keyctx = EVP_PKEY_CTX_new(params, null);
-        if (keyctx is null) {
-            throw new CryptographicException("Cannot get an OpenSSL private key context.");
-        }
-        if (EVP_PKEY_keygen_init(keyctx) < 1) {
-            throw new CryptographicException("Cannot initialize the OpenSSL private key context.");
-        }
-        if (EVP_PKEY_keygen(keyctx, &key) < 1) {
-            throw new CryptographicException("Unable to generate the private key.");
-        }
-
+        key = eccGenerate(curve);
         _hasPrivateKey = true;
     }
 
     public this(string privateKey, string password)
     {
-        //Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
-        ubyte[] seedbuf = random(32);
-        RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
-
+        key = eccLoadPrivateKey(privateKey, password);
         _hasPrivateKey = true;
-        ubyte[] pk = cast(ubyte[])privateKey;
-
-        BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-        if (password is null) {
-            key = PEM_read_bio_PrivateKey(bio, null, null, null);
-        } else {
-            ubyte[] pwd = cast(ubyte[])password;
-            pwd = pwd ~ '\0';
-
-            key = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
-        }
-        BIO_free_all(bio);
     }
 
     public this(string publicKey)
     {
-        //Reseed the OpenSSL RNG every time we load an existing ECC Key to ensure that the result is truely random in threading/forking scenarios.
-        ubyte[] seedbuf = random(32);
-        RAND_seed(seedbuf.ptr, cast(int)seedbuf.length);
-
+        key = eccLoadPublicKey(publicKey);
         _hasPrivateKey = false;
-        ubyte[] pk = cast(ubyte[])publicKey;
-
-        BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-        key = PEM_read_bio_PUBKEY(bio, null, null, null);
-        BIO_free_all(bio);
     }
 
     public ~this()
     {
-        if (key !is null) {
-            EVP_PKEY_free(key);
-        }
-        if (keyctx !is null) {
-            EVP_PKEY_CTX_free(keyctx);
-        }
-        if (params !is null) {
-            EVP_PKEY_free(params);
-        }
-        if (paramsctx !is null) {
-            EVP_PKEY_CTX_free(paramsctx);
-        }
+        eccFree(key);
     }
 
     public ubyte[] derive(string peerKey)
     {
-        ubyte[] pk = cast(ubyte[])peerKey;
-        BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
-        EVP_PKEY* peer = PEM_read_bio_PUBKEY(bio, null, null, null);
-        BIO_free_all(bio);
-
-        //Initialize the key derivation context.
-        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(key, null);
-        if (ctx is null) {
-            throw new CryptographicException("Unable to create the key derivation context.");
-        }
-        if (EVP_PKEY_derive_init(ctx) <= 0) {
-            throw new CryptographicException("Unable to initialize the key derivation context.");
-        }
-        if (EVP_PKEY_derive_set_peer(ctx, peer) <= 0) {
-            throw new CryptographicException("Unable to set the peer key.");
-        }
-
-        //Derive the key
-        size_t dklen = 0;
-        if (EVP_PKEY_derive(ctx, null, &dklen) <= 0) {
-            throw new CryptographicException("Unable to determine the length of the derived key.");
-        }
-        ubyte[] derivedKey = new ubyte[dklen];
-        if (EVP_PKEY_derive(ctx, derivedKey.ptr, &dklen) <= 0) {
-            throw new CryptographicException("Unable to determine the length of the derived key.");
-        }
-
-        return derivedKey;
+        return eccDerive(key, peerKey);
     }
 
     public ubyte[] sign(ubyte[] data, bool useSha256 = false)
     {
-        EVP_PKEY_CTX* pkeyctx = null;
-
-        pkeyctx = EVP_PKEY_CTX_new(key, null);
-        if (pkeyctx is null) {
-            throw new CryptographicException("Unable to create the key signing context.");
-        }
-        scope(exit) {
-            if (pkeyctx !is null) {
-                EVP_PKEY_CTX_free(pkeyctx);
-            }
-        }
-
-        if (EVP_PKEY_sign_init(pkeyctx) <= 0) {
-            throw new CryptographicException("Unable to initialize the signing digest.");
-        }
-
-        if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0) {
-            throw new CryptographicException("Unable to set the signing digest.");
-        }
-
-        size_t signlen = 0;
-        if (EVP_PKEY_sign(pkeyctx, null, &signlen, data.ptr, data.length) <= 0) {
-            throw new CryptographicException("Unable to calculate signature length.");
-        }
-
-        ubyte[] sign = new ubyte[signlen];
-        if (EVP_PKEY_sign(pkeyctx, sign.ptr, &signlen, data.ptr, data.length) <= 0) {
-            throw new CryptographicException("Unable to calculate signature.");
-        }
-
-        return sign;
+        return eccSign(key, data, useSha256);
     }
 
     public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
     {
-        EVP_PKEY_CTX* pkeyctx = null;
-
-        pkeyctx = EVP_PKEY_CTX_new(key, null);
-        if (pkeyctx is null) {
-            throw new CryptographicException("Unable to create the key signing context.");
-        }
-        scope(exit) {
-            if (pkeyctx !is null) {
-                EVP_PKEY_CTX_free(pkeyctx);
-            }
-        }
-
-        if (EVP_PKEY_verify_init(pkeyctx) <= 0) {
-            throw new CryptographicException("Unable to initialize the signing digest.");
-        }
-
-        if (EVP_PKEY_CTX_set_signature_md(pkeyctx, cast(void*)(!useSha256 ? EVP_sha384() : EVP_sha256())) <= 0) {
-            throw new CryptographicException("Unable to set the signing digest.");
-        }
-
-        int ret = EVP_PKEY_verify(pkeyctx, data.ptr, cast(long)data.length, signature.ptr, cast(long)signature.length);
-
-        return ret != 1;
+        return eccVerify(key, data, signature, useSha256);
     }
 
     public string getPublicKey()
     {
-        BIO* bio = BIO_new(BIO_s_mem());
-
-        PEM_write_bio_PUBKEY(bio, key);
-
-        ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
-        BIO_read(bio, buffer.ptr, cast(int)buffer.length);
-        BIO_free_all(bio);
-
-        return cast(string)buffer;
+        return eccGetPublicKey(key);
     }
 
     public string getPrivateKey(string password, bool use3Des = false)
@@ -231,39 +86,13 @@ public class EllipticCurve
         if (!_hasPrivateKey) {
             return null;
         }
-
-        BIO* bio = BIO_new(BIO_s_mem());
-
-        if (password is null) {
-            PEM_write_bio_PKCS8PrivateKey(bio, key, null, null, 0, null, null);
-        } else {
-            ubyte[] pwd = cast(ubyte[])password;
-            pwd = pwd ~ '\0';
-
-            PEM_write_bio_PKCS8PrivateKey(
-                bio,
-                key,
-                !use3Des ? EVP_aes_256_cbc() : EVP_des_ede3_cbc(),
-                null,
-                0,
-                null,
-                pwd.ptr);
-        }
-
-        if(BIO_ctrl_pending(bio) == 0) {
-            throw new CryptographicException("No private key written.");
-        }
-
-        ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
-        BIO_read(bio, buffer.ptr, cast(int)buffer.length);
-        BIO_free_all(bio);
-
-        return cast(string)buffer;
+        return eccGetPrivateKey(key, password, use3Des);
     }
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
 
     writeln("Testing EllipticCurve Private Key Extraction/Recreation:");
@@ -296,10 +125,12 @@ unittest
     writeln(pkRecPwd);
 
     assert(pkNoPwd == pkRecNoPwd);
+    });
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
 
     writeln("Testing EllipticCurve Key Derivation:");
@@ -328,10 +159,12 @@ unittest
     assert(key1 !is null);
     assert(key2 !is null);
     assert(constantTimeEquality(key1, key2));
+    });
 }
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
 
     writeln("Testing EllipticCurve Signing/Verification:");
@@ -344,17 +177,70 @@ unittest
     ubyte[] sig = eckey.sign(data);
     writeln("Signature: ", toHexString!(LetterCase.lower)(sig));
     assert(eckey.verify(data, sig));
+    });
 }
 
-private int getOpenSSLCurveId(EccCurve curve) {
-    import std.conv;
-    import std.format;
+unittest
+{
+    skipIfUnsupported({
+    import std.digest;
 
-    switch (curve) {
-        case EccCurve.P256: return NID_secp256k1;
-        case EccCurve.P384: return NID_secp384r1;
-        case EccCurve.P521: return NID_secp521r1;
-        default:
-            throw new CryptographicException(format("ECC Curve '%s' not supported.", to!string(curve)));
+    writeln("Testing EllipticCurve Signing/Verification with SHA-256:");
+
+    EllipticCurve eckey = new EllipticCurve();
+
+    ubyte[] data  = cast(ubyte[])"A message signed with ECDSA over SHA-256.";
+    ubyte[] data2 = cast(ubyte[])"A different message that was never signed.";
+
+    ubyte[] sig = eckey.sign(data, true);
+    writeln("Signature: ", toHexString!(LetterCase.lower)(sig));
+    assert(eckey.verify(data, sig, true));
+    assert(!eckey.verify(data2, sig, true));
+    });
+}
+
+unittest
+{
+    skipIfUnsupported({
+    import std.digest;
+
+    writeln("Testing EllipticCurve public-key-only operations:");
+
+    EllipticCurve eckey = new EllipticCurve();
+    assert(eckey.hasPrivateKey);
+
+    ubyte[] data = cast(ubyte[])"Data signed by the private key.";
+    ubyte[] sig = eckey.sign(data);
+
+    // Reconstruct from the public key only.
+    string pubKey = eckey.getPublicKey();
+    EllipticCurve pubOnly = new EllipticCurve(pubKey);
+
+    assert(!pubOnly.hasPrivateKey);
+    assert(pubOnly.getPrivateKey(null) is null);
+    assert(pubOnly.verify(data, sig));
+    });
+}
+
+unittest
+{
+    skipIfUnsupported({
+    import std.digest;
+
+    writeln("Testing EllipticCurve signing across all curves:");
+
+    foreach (curve; [EccCurve.P256, EccCurve.P384, EccCurve.P521]) {
+        EllipticCurve eckey = new EllipticCurve(curve);
+
+        ubyte[] data = cast(ubyte[])"Curve round-trip test data.";
+        ubyte[] sig = eckey.sign(data);
+        assert(eckey.verify(data, sig));
+
+        // Key agreement between two keys on the same curve.
+        EllipticCurve peer = new EllipticCurve(curve);
+        ubyte[] secretA = eckey.derive(peer.getPublicKey());
+        ubyte[] secretB = peer.derive(eckey.getPublicKey());
+        assert(constantTimeEquality(secretA, secretB));
     }
+    });
 }

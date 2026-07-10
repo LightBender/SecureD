@@ -2,10 +2,18 @@ module secured.hash;
 
 import std.stdio;
 
-import secured.openssl;
-import deimos.openssl.evp;
-
+import secured.provider;
 import secured.util;
+
+static if (usesOpenSSL) {
+    import secured.system.openssl : hash_impl_openssl;
+}
+static if (activeProvider == Provider.CNG) {
+    import secured.system.windows : hash_impl_cng, cngSupportsHash;
+}
+static if (activeProvider == Provider.CommonCrypto) {
+    import secured.system.macos : hash_impl_commoncrypto, commonCryptoSupportsHash;
+}
 
 public enum HashAlgorithm : ubyte {
     None,
@@ -21,6 +29,11 @@ public enum HashAlgorithm : ubyte {
 	Default = SHA2_384,
 }
 
+package(secured) string unsupportedHashMessage(HashAlgorithm func) {
+    import std.conv : to;
+    return "Hash algorithm '" ~ to!string(func) ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
+}
+
 @safe public ubyte[] hash(const ubyte[] data) {
     return hash_ex(data, HashAlgorithm.Default);
 }
@@ -32,35 +45,29 @@ public enum HashAlgorithm : ubyte {
 
 @trusted public ubyte[] hash_ex(const ubyte[] data, HashAlgorithm func)
 {
-    //Create the OpenSSL context
-    EVP_MD_CTX *mdctx;
-    if ((mdctx = EVP_MD_CTX_new()) == null) {
-        throw new CryptographicException("Unable to create OpenSSL context.");
-    }
-    scope(exit) {
-        if(mdctx !is null) {
-            EVP_MD_CTX_free(mdctx);
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        return hash_impl_openssl(data, func);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsHash(func)) {
+            return hash_impl_cng(data, func);
+        } else static if (polyfillEnabled) {
+            return hash_impl_openssl(data, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedHashMessage(func));
         }
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsHash(func)) {
+            return hash_impl_commoncrypto(data, func);
+        } else static if (polyfillEnabled) {
+            return hash_impl_openssl(data, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedHashMessage(func));
+        }
+    } else static if (polyfillEnabled) {
+        return hash_impl_openssl(data, func);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(func));
     }
-
-    //Initialize the hash algorithm
-    if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
-        throw new CryptographicException("Unable to create hash context.");
-    }
-
-    //Run the provided data through the digest algorithm
-    if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0) {
-        throw new CryptographicException("Error while updating digest.");
-    }
-
-    //Copy the OpenSSL digest to our D buffer.
-    uint digestlen;
-    ubyte[] digest = new ubyte[getHashLength(func)];
-    if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0) {
-        throw new CryptographicException("Error while retrieving the digest.");
-    }
-
-    return digest;
 }
 
 @safe public bool hash_verify_ex(const ubyte[] test, const ubyte[] data, HashAlgorithm func) {
@@ -69,6 +76,7 @@ public enum HashAlgorithm : ubyte {
 }
 
 unittest {
+    skipIfUnsupported({
     import std.digest;
 
     writeln("Testing SHA2 Byte Array Hash:");
@@ -87,9 +95,11 @@ unittest {
     assert(toHexString!(LetterCase.lower)(vec2) == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7");
     assert(toHexString!(LetterCase.lower)(vec3) == "3391fdddfc8dc7393707a65b1b4709397cf8b1d162af05abfe8f450de5f36bc6b0455a8520bc4e6f5fe95b1fe3c8452b");
     assert(toHexString!(LetterCase.lower)(vec4) == "ed892481d8272ca6df370bf706e4d7bc1b5739fa2177aae6c50e946678718fc67a7af2819a021c2fc34e91bdb63409d7");
+    });
 }
 
 unittest {
+    skipIfUnsupported({
     import std.digest;
 
     writeln("Testing SHA3 Byte Array Hash:");
@@ -108,6 +118,7 @@ unittest {
     assert(toHexString!(LetterCase.lower)(vec2) == "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25");
     assert(toHexString!(LetterCase.lower)(vec3) == "991c665755eb3a4b6bbdfb75c78a492e8c56a22c5c4d7e429bfdbc32b9d4ad5aa04a1f076e62fea19eef51acd0657c22");
     assert(toHexString!(LetterCase.lower)(vec4) == "1a34d81695b622df178bc74df7124fe12fac0f64ba5250b78b99c1273d4b080168e10652894ecad5f1f4d5b965437fb9");
+    });
 }
 
 @safe public ubyte[] hash(string path) {
@@ -121,45 +132,29 @@ unittest {
 
 @trusted public ubyte[] hash_ex(string path, HashAlgorithm func)
 {
-    //Open the file for reading
-    auto fsfile = File(path, "rb");
-    scope(exit) {
-        if(fsfile.isOpen()) {
-            fsfile.close();
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        return hash_impl_openssl(path, func);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsHash(func)) {
+            return hash_impl_cng(path, func);
+        } else static if (polyfillEnabled) {
+            return hash_impl_openssl(path, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedHashMessage(func));
         }
-    }
-
-    //Create the OpenSSL context
-    EVP_MD_CTX *mdctx;
-    if ((mdctx = EVP_MD_CTX_new()) == null) {
-        throw new CryptographicException("Unable to create OpenSSL context.");
-    }
-    scope(exit) {
-        if(mdctx !is null) {
-            EVP_MD_CTX_free(mdctx);
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsHash(func)) {
+            return hash_impl_commoncrypto(path, func);
+        } else static if (polyfillEnabled) {
+            return hash_impl_openssl(path, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedHashMessage(func));
         }
+    } else static if (polyfillEnabled) {
+        return hash_impl_openssl(path, func);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(func));
     }
-
-    //Initialize the hash algorithm
-    if (EVP_DigestInit_ex(mdctx, getOpenSSLHashAlgorithm(func), null) < 0) {
-        throw new CryptographicException("Unable to create hash context.");
-    }
-
-    //Read the file in chunks and update the Digest
-    foreach(ubyte[] data; fsfile.byChunk(FILE_BUFFER_SIZE)) {
-        if (EVP_DigestUpdate(mdctx, data.ptr, data.length) < 0) {
-            throw new CryptographicException("Error while updating digest.");
-        }
-    }
-
-    //Copy the OpenSSL digest to our D buffer.
-    uint digestlen;
-    ubyte[] digest = new ubyte[getHashLength(func)];
-    if (EVP_DigestFinal_ex(mdctx, digest.ptr, &digestlen) < 0) {
-        throw new CryptographicException("Error while retrieving the digest.");
-    }
-
-    return digest;
 }
 
 @safe public bool hash_verify_ex(string path, HashAlgorithm func, ubyte[] test) {
@@ -168,6 +163,7 @@ unittest {
 }
 
 unittest {
+    skipIfUnsupported({
     import std.digest;
 
     writeln("Testing File Hash:");
@@ -181,47 +177,10 @@ unittest {
     assert(toHexString!(LetterCase.lower)(vec) == "3391fdddfc8dc7393707a65b1b4709397cf8b1d162af05abfe8f450de5f36bc6b0455a8520bc4e6f5fe95b1fe3c8452b");
 
     remove("hashtest.txt");
+    });
 }
 
-@trusted package const(EVP_MD)* getOpenSSLHashAlgorithm(HashAlgorithm func) {
-    import std.conv;
-    import std.format;
-
-    switch (func) {
-        case HashAlgorithm.SHA2_256: return EVP_sha256();
-        case HashAlgorithm.SHA2_384: return EVP_sha384();
-        case HashAlgorithm.SHA2_512: return EVP_sha512();
-        case HashAlgorithm.SHA2_512_224: return EVP_sha512_224();
-        case HashAlgorithm.SHA2_512_256: return EVP_sha512_256();
-        case HashAlgorithm.SHA3_224: return EVP_sha3_224();
-        case HashAlgorithm.SHA3_256: return EVP_sha3_256();
-        case HashAlgorithm.SHA3_384: return EVP_sha3_384();
-        case HashAlgorithm.SHA3_512: return EVP_sha3_512();
-        default:
-            throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
-    }
-}
-
-@trusted package string getOpenSSLHashAlgorithmString(HashAlgorithm func) {
-    import std.conv;
-    import std.format;
-
-    switch (func) {
-        case HashAlgorithm.SHA2_256: return "sha256";
-        case HashAlgorithm.SHA2_384: return "sha384";
-        case HashAlgorithm.SHA2_512: return "sha512";
-        case HashAlgorithm.SHA2_512_224: return "sha512-224";
-        case HashAlgorithm.SHA2_512_256: return "sha512-256";
-        case HashAlgorithm.SHA3_224: return "sha3-224";
-        case HashAlgorithm.SHA3_256: return "sha3-256";
-        case HashAlgorithm.SHA3_384: return "sha3-384";
-        case HashAlgorithm.SHA3_512: return "sha3-512";
-        default:
-            throw new CryptographicException(format("Hash Function '%s' is not supported by OpenSSL.", to!string(func)));
-    }
-}
-
-@safe package uint getHashLength(HashAlgorithm func) {
+@safe package(secured) uint getHashLength(HashAlgorithm func) {
     import std.conv;
     import std.format;
 

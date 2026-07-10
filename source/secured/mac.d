@@ -3,11 +3,19 @@ module secured.mac;
 import std.stdio;
 import std.format;
 
-import secured.openssl;
-import deimos.openssl.evp;
 import secured.hash;
+import secured.provider;
 import secured.util;
 
+static if (usesOpenSSL) {
+    import secured.system.openssl : hmac_impl_openssl;
+}
+static if (activeProvider == Provider.CNG) {
+    import secured.system.windows : hmac_impl_cng, cngSupportsHash;
+}
+static if (activeProvider == Provider.CommonCrypto) {
+    import secured.system.macos : hmac_impl_commoncrypto, commonCryptoSupportsHash;
+}
 
 @safe public ubyte[] hmac(const ubyte[] key, const ubyte[] data) {
     return hmac_ex(key, data, HashAlgorithm.Default);
@@ -24,47 +32,34 @@ import secured.util;
         throw new CryptographicException(format("HMAC key must be less than or equal to %s bytes in length.", getHashLength(func)));
     }
 
-    //Create the OpenSSL context
-    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-    if (mdctx == null) {
-        throw new CryptographicException("Unable to create OpenSSL context.");
-    }
-    scope(exit) {
-        if(mdctx !is null) {
-            EVP_MD_CTX_free(mdctx);
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        return hmac_impl_openssl(key, data, func);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsHash(func)) {
+            return hmac_impl_cng(key, data, func);
+        } else static if (polyfillEnabled) {
+            return hmac_impl_openssl(key, data, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedHmacMessage(func));
         }
-    }
-
-    //Initialize the hash algorithm
-    auto md = getOpenSSLHashAlgorithm(func);
-    if (EVP_DigestInit_ex(mdctx, md, null) != 1) {
-        throw new CryptographicException("Unable to create hash context.");
-    }
-
-    //Create the HMAC key context
-    auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, null, key.ptr, cast(int)key.length);
-    scope(exit) {
-        if(pkey !is null) {
-            EVP_PKEY_free(pkey);
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsHash(func)) {
+            return hmac_impl_commoncrypto(key, data, func);
+        } else static if (polyfillEnabled) {
+            return hmac_impl_openssl(key, data, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedHmacMessage(func));
         }
+    } else static if (polyfillEnabled) {
+        return hmac_impl_openssl(key, data, func);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedHmacMessage(func));
     }
-    if (EVP_DigestSignInit(mdctx, null, md, null, pkey) != 1) {
-        throw new CryptographicException("Unable to create HMAC key context.");
-    }
+}
 
-    //Run the provided data through the digest algorithm
-    if (EVP_DigestSignUpdate(mdctx, data.ptr, data.length) != 1) {
-        throw new CryptographicException("Error while updating digest.");
-    }
-
-    //Copy the OpenSSL digest to our D buffer.
-    size_t digestlen = getHashLength(func);
-    ubyte[] digest = new ubyte[getHashLength(func)];
-    if (EVP_DigestSignFinal(mdctx, digest.ptr, &digestlen) < 0) {
-        throw new CryptographicException("Error while retrieving the digest.");
-    }
-
-    return digest;
+package(secured) string unsupportedHmacMessage(HashAlgorithm func) {
+    import std.conv : to;
+    return "HMAC algorithm '" ~ to!string(func) ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
 }
 
 @safe public bool hmac_verify_ex(const ubyte[] test, const ubyte[] key, const ubyte[] data, HashAlgorithm func){
@@ -73,6 +68,7 @@ import secured.util;
 }
 
 unittest {
+    skipIfUnsupported({
     import std.digest;
 
     ubyte[48] key = [ 0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
@@ -107,4 +103,5 @@ unittest {
     assert(hmac_verify_ex(verify_hash, keyshort, cast(ubyte[])"", HashAlgorithm.SHA2_256));
 
     writeln(toHexString!(LetterCase.lower)(verify_hash));
+    });
 }

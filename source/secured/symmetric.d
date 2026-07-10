@@ -5,14 +5,22 @@ import std.conv;
 import std.stdio;
 import std.string;
 
-import deimos.openssl.evp;
-
 import secured.hash;
 import secured.mac;
 import secured.kdf;
+import secured.provider;
 import secured.random;
 import secured.util;
-import secured.openssl;
+
+static if (usesOpenSSL) {
+    import secured.system.openssl : encrypt_impl_openssl, decrypt_impl_openssl;
+}
+static if (activeProvider == Provider.CNG) {
+    import secured.system.windows : encrypt_impl_cng, decrypt_impl_cng, cngSupportsCipher;
+}
+static if (activeProvider == Provider.CommonCrypto) {
+    import secured.system.macos : encrypt_impl_commoncrypto, decrypt_impl_commoncrypto, commonCryptoSupportsCipher;
+}
 
 public enum SymmetricAlgorithm : ubyte {
     AES128_GCM,
@@ -125,6 +133,10 @@ pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, co
     return EncryptedData(result, iv, authTag, key.algorithm);
 }
 
+package(secured) string unsupportedCipherMessage(SymmetricAlgorithm algorithm) {
+    return "Symmetric algorithm '" ~ to!string(algorithm) ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
+}
+
 @trusted public ubyte[] encrypt_ex(const ubyte[] data, const ubyte[] associatedData, const ubyte[] encryptionKey, const ubyte[] iv, out ubyte[] authTag, SymmetricAlgorithm algorithm) {
     if (encryptionKey.length != getCipherKeyLength(algorithm)) {
         throw new CryptographicException("Encryption Key must be " ~ to!string(getCipherKeyLength(algorithm)) ~ " bytes in length.");
@@ -133,55 +145,33 @@ pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, co
         throw new CryptographicException("IV must be " ~ to!string(getCipherIVLength(algorithm)) ~ " bytes in length.");
     }
 
-    //Get the OpenSSL cipher context
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    if (ctx is null) {
-        throw new CryptographicException("Cannot get an OpenSSL cipher context.");
-    }
-    scope(exit) {
-        if (ctx !is null) {
-            EVP_CIPHER_CTX_free(ctx);
+    ubyte[] result;
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        result = encrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsCipher(algorithm)) {
+            result = encrypt_impl_cng(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else static if (polyfillEnabled) {
+            result = encrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
         }
-    }
-
-    //Initialize the cipher context
-    if (EVP_EncryptInit_ex(ctx, getOpenSslCipher(algorithm), null, encryptionKey.ptr, iv.ptr) != 1) {
-        throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-    }
-
-    //Write the additional data to the cipher context, if any
-    if (associatedData !is null && isAeadCipher(algorithm)) {
-        int aadLen = 0;
-        if (EVP_EncryptUpdate(ctx, null, &aadLen, associatedData.ptr, cast(int)associatedData.length) != 1) {
-            throw new CryptographicException("Unable to write bytes to cipher context.");
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsCipher(algorithm)) {
+            result = encrypt_impl_commoncrypto(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else static if (polyfillEnabled) {
+            result = encrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
         }
-    }
-
-    //Write data to the cipher context
-    int written = 0;
-    int len = 0;
-    ubyte[] output = new ubyte[data.length + 32];
-    if (EVP_EncryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length) != 1) {
-        throw new CryptographicException("Unable to write bytes to cipher context.");
-    }
-    written += len;
-
-    //Extract the complete ciphertext
-    if (EVP_EncryptFinal_ex(ctx, &output[written], &len) != 1) {
-        throw new CryptographicException("Unable to extract the ciphertext from the cipher context.");
-    }
-
-    written += len;
-    ubyte[] result = output[0..written];
-
-    //Extract the auth tag
-    if (isAeadCipher(algorithm)) {
-        ubyte[] _auth = new ubyte[getAuthLength(algorithm)];
-        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, getAuthLength(algorithm), _auth.ptr) != 1) {
-            throw new CryptographicException("Unable to extract the authentication tag from the cipher context.");
-        }
-        authTag = _auth;
+    } else static if (polyfillEnabled) {
+        result = encrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
     } else {
+        throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
+    }
+
+    //Non-AEAD ciphers are authenticated with an encrypt-then-MAC HMAC tag.
+    if (!isAeadCipher(algorithm)) {
         authTag = hmac(iv, hash(result) ~ hash(associatedData));
     }
 
@@ -207,76 +197,32 @@ pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, co
         throw new CryptographicException("Failed to verify the authTag.");
     }
 
-    //Get the OpenSSL cipher context
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    if (ctx is null) {
-        throw new CryptographicException("Cannot get an OpenSSL cipher context.");
-    }
-    scope(exit) {
-        if (ctx !is null) {
-            EVP_CIPHER_CTX_free(ctx);
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        return decrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsCipher(algorithm)) {
+            return decrypt_impl_cng(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else static if (polyfillEnabled) {
+            return decrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
         }
-    }
-
-    //Initialize the cipher context
-    if (!EVP_DecryptInit_ex(ctx, getOpenSslCipher(algorithm), null, encryptionKey.ptr, iv.ptr)) {
-        throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
-    }
-
-    //Write the additional data to the cipher context, if any
-    if (associatedData.length != 0 && isAeadCipher(algorithm)) {
-        int aadLen = 0;
-        if (!EVP_DecryptUpdate(ctx, null, &aadLen, associatedData.ptr, cast(int)associatedData.length)) {
-            throw new CryptographicException("Unable to write bytes to cipher context.");
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsCipher(algorithm)) {
+            return decrypt_impl_commoncrypto(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else static if (polyfillEnabled) {
+            return decrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
         }
-    }
-
-    //Use the supplied tag to verify the message
-    if (isAeadCipher(algorithm)) {
-        if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, cast(int)authTag.length, (cast(ubyte[])authTag).ptr)) {
-            throw new CryptographicException("Unable to set the authentication tag on the cipher context.");
-        }
-    }
-
-    //Write data to the cipher context
-    int written = 0;
-    int len = 0;
-    ubyte[] output = new ubyte[data.length + 32];
-    if (!EVP_DecryptUpdate(ctx, &output[written], &len, data.ptr, cast(int)data.length)) {
-        throw new CryptographicException("Unable to write bytes to cipher context.");
-    }
-    written += len;
-
-    //Extract the complete plaintext
-    if (EVP_DecryptFinal_ex(ctx, &output[written], &len) <= 0) {
-        throw new CryptographicException("Unable to extract the plaintext from the cipher context.");
-    }
-    written += len;
-
-    return output[0..written];
-}
-
-@trusted package const(EVP_CIPHER*) getOpenSslCipher(SymmetricAlgorithm algo) {
-    switch(algo) {
-        case SymmetricAlgorithm.AES128_GCM: return EVP_aes_128_gcm();
-        case SymmetricAlgorithm.AES192_GCM: return EVP_aes_192_gcm();
-        case SymmetricAlgorithm.AES256_GCM: return EVP_aes_256_gcm();
-        case SymmetricAlgorithm.AES128_CTR: return EVP_aes_128_ctr();
-        case SymmetricAlgorithm.AES192_CTR: return EVP_aes_192_ctr();
-        case SymmetricAlgorithm.AES256_CTR: return EVP_aes_256_ctr();
-        case SymmetricAlgorithm.AES128_CFB: return EVP_aes_128_cfb();
-        case SymmetricAlgorithm.AES192_CFB: return EVP_aes_192_cfb();
-        case SymmetricAlgorithm.AES256_CFB: return EVP_aes_256_cfb();
-        case SymmetricAlgorithm.AES128_CBC: return EVP_aes_128_cbc();
-        case SymmetricAlgorithm.AES192_CBC: return EVP_aes_192_cbc();
-        case SymmetricAlgorithm.AES256_CBC: return EVP_aes_256_cbc();
-        case SymmetricAlgorithm.ChaCha20: return EVP_chacha20();
-        case SymmetricAlgorithm.ChaCha20_Poly1305: return EVP_chacha20_poly1305();
-        default: return EVP_aes_256_gcm();
+    } else static if (polyfillEnabled) {
+        return decrypt_impl_openssl(data, associatedData, encryptionKey, iv, authTag, algorithm);
+    } else {
+        throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
     }
 }
 
-@safe package bool isAeadCipher(SymmetricAlgorithm algo) {
+@safe package(secured) bool isAeadCipher(SymmetricAlgorithm algo) {
     switch(algo) {
         case SymmetricAlgorithm.AES128_GCM: return true;
         case SymmetricAlgorithm.AES192_GCM: return true;
@@ -317,7 +263,7 @@ pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, co
     }
 }
 
-@safe package uint getAuthLength(SymmetricAlgorithm symmetric, HashAlgorithm hash = HashAlgorithm.Default) {
+@safe package(secured) uint getAuthLength(SymmetricAlgorithm symmetric, HashAlgorithm hash = HashAlgorithm.Default) {
     switch(symmetric) {
         case SymmetricAlgorithm.AES128_GCM: return 16;
         case SymmetricAlgorithm.AES192_GCM: return 16;
@@ -329,6 +275,7 @@ pragma(inline) @safe private ubyte[] deriveKey(const ubyte[] key, uint bytes, co
 
 unittest
 {
+    skipIfUnsupported({
     import std.digest;
     import std.stdio;
 
@@ -395,4 +342,5 @@ unittest
     writeln("Decryption Output: ", cast(string)dec3);
 
     assert((cast(string)dec3) == cast(string)input);
+    });
 }
