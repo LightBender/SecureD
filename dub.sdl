@@ -13,12 +13,7 @@ targetPath "bin/"
 
 // advapi32 provides the Windows system RNG (CryptGenRandom) used on all Windows builds.
 libs "advapi32" platform="windows"
-
-// OpenSSL library search paths are scoped to the configurations that actually link
-// libssl/libcrypto (openssl, polyfill, libressl, boringssl). We deliberately do NOT
-// add a global "-L/usr/local/lib" here: on Apple Silicon that directory can hold
-// stale x86_64 homebrew artifacts (including a wrong-arch libphobos2-ldc) that the
-// linker would pick up ahead of the toolchain's native libraries.
+lflags "-L/usr/local/lib/" platform="posix"
 
 // ---------------------------------------------------------------------------
 // Provider configurations
