@@ -91,7 +91,7 @@ If an unsupported algorithm is requested while the polyfill is disabled, SecureD
 | AES-CTR / AES-CFB            | ✅                             | ↩             | ✅                  |
 | ChaCha20 / ChaCha20-Poly1305 | ✅                             | ↩             | ↩                   |
 | PBKDF2                       | ✅                             | ✅            | ✅                  |
-| HKDF                         | ✅                             | ↩             | ↩                   |
+| HKDF                         | ✅                             | ✅            | ✅                  |
 | SCrypt                       | ✅ (↩ BoringSSL)               | ↩             | ↩                  |
 | ECC (P-256 / 384 / 521)      | ✅                             | ✅            | ✅ †                |
 | RSA (seal / OAEP / sign)     | ✅                             | ✅            | ✅ †                |

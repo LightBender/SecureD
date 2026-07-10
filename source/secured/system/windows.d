@@ -179,6 +179,35 @@ package(secured) const(wchar)* getCngHashAlgId(HashAlgorithm func) {
 }
 
 // ---------------------------------------------------------------------------
+// HKDF (RFC 5869)
+//
+// CNG's BCRYPT_HKDF provider requires a fragile property-ordering dance for the
+// info parameter, so the extract-and-expand construction is built directly on
+// the CNG HMAC primitive (via hmac_impl_cng) instead. Output is identical to any
+// RFC 5869 implementation for the same inputs.
+// ---------------------------------------------------------------------------
+@trusted package(secured) ubyte[] hkdf_impl_cng(const ubyte[] key, const ubyte[] salt, string info, size_t outputLen, HashAlgorithm func) {
+    immutable size_t hashLen = getHashLength(func);
+
+    // Extract: PRK = HMAC-Hash(salt, IKM). An empty salt defaults to hashLen zero bytes.
+    const(ubyte)[] extractSalt = salt.length > 0 ? salt : new ubyte[hashLen];
+    ubyte[] prk = hmac_impl_cng(extractSalt, key, func);
+
+    // Expand: T(i) = HMAC-Hash(PRK, T(i-1) | info | i), OKM = T(1) | T(2) | ...
+    ubyte[] infoBytes = cast(ubyte[])info;
+    ubyte[] okm;
+    ubyte[] previous;
+    ubyte counter = 1;
+    while (okm.length < outputLen) {
+        ubyte[] input = previous ~ infoBytes ~ [counter];
+        previous = hmac_impl_cng(prk, input, func);
+        okm ~= previous;
+        counter++;
+    }
+    return okm[0 .. outputLen];
+}
+
+// ---------------------------------------------------------------------------
 // Symmetric ciphers (AES-GCM / AES-CBC; CTR/CFB/ChaCha20 -> polyfill)
 // ---------------------------------------------------------------------------
 @safe package(secured) bool cngSupportsCipher(SymmetricAlgorithm algo) {

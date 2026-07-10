@@ -16,10 +16,10 @@ static if (usesOpenSSL) {
     import secured.system.openssl : pbkdf2_impl_openssl, hkdf_impl_openssl, scrypt_impl_openssl;
 }
 static if (activeProvider == Provider.CNG) {
-    import secured.system.windows : pbkdf2_impl_cng, cngSupportsHash;
+    import secured.system.windows : pbkdf2_impl_cng, hkdf_impl_cng, cngSupportsHash;
 }
 static if (activeProvider == Provider.CommonCrypto) {
-    import secured.system.macos : pbkdf2_impl_commoncrypto, commonCryptoSupportsHash;
+    import secured.system.macos : pbkdf2_impl_commoncrypto, hkdf_impl_commoncrypto, commonCryptoSupportsHash;
 }
 
 /**
@@ -545,7 +545,25 @@ unittest
         throw new CryptographicException("HKDF key cannot be an empty array.");
     }
 
-    static if (usesOpenSSL) {
+    static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
+        return hkdf_impl_openssl(key, salt, info, outputLen, func);
+    } else static if (activeProvider == Provider.CNG) {
+        if (cngSupportsHash(func)) {
+            return hkdf_impl_cng(key, salt, info, outputLen, func);
+        } else static if (polyfillEnabled) {
+            return hkdf_impl_openssl(key, salt, info, outputLen, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedKdfMessage("HKDF"));
+        }
+    } else static if (activeProvider == Provider.CommonCrypto) {
+        if (commonCryptoSupportsHash(func)) {
+            return hkdf_impl_commoncrypto(key, salt, info, outputLen, func);
+        } else static if (polyfillEnabled) {
+            return hkdf_impl_openssl(key, salt, info, outputLen, func);
+        } else {
+            throw new AlgorithmNotSupportedException(unsupportedKdfMessage("HKDF"));
+        }
+    } else static if (polyfillEnabled) {
         return hkdf_impl_openssl(key, salt, info, outputLen, func);
     } else {
         throw new AlgorithmNotSupportedException(unsupportedKdfMessage("HKDF"));

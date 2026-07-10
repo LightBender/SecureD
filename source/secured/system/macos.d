@@ -136,6 +136,35 @@ private CCPseudoRandomAlgorithm getCCPrf(HashAlgorithm func) {
 }
 
 // ---------------------------------------------------------------------------
+// HKDF (RFC 5869)
+//
+// CommonCrypto exposes HMAC (CCHmac) but no standalone HKDF entry point, so the
+// extract-and-expand construction is built directly on the CommonCrypto HMAC
+// primitive (via hmac_impl_commoncrypto). Output is identical to any RFC 5869
+// implementation for the same inputs.
+// ---------------------------------------------------------------------------
+@trusted package(secured) ubyte[] hkdf_impl_commoncrypto(const ubyte[] key, const ubyte[] salt, string info, size_t outputLen, HashAlgorithm func) {
+    immutable size_t hashLen = getHashLength(func);
+
+    // Extract: PRK = HMAC-Hash(salt, IKM). An empty salt defaults to hashLen zero bytes.
+    const(ubyte)[] extractSalt = salt.length > 0 ? salt : new ubyte[hashLen];
+    ubyte[] prk = hmac_impl_commoncrypto(extractSalt, key, func);
+
+    // Expand: T(i) = HMAC-Hash(PRK, T(i-1) | info | i), OKM = T(1) | T(2) | ...
+    ubyte[] infoBytes = cast(ubyte[])info;
+    ubyte[] okm;
+    ubyte[] previous;
+    ubyte counter = 1;
+    while (okm.length < outputLen) {
+        ubyte[] input = previous ~ infoBytes ~ [counter];
+        previous = hmac_impl_commoncrypto(prk, input, func);
+        okm ~= previous;
+        counter++;
+    }
+    return okm[0 .. outputLen];
+}
+
+// ---------------------------------------------------------------------------
 // Symmetric ciphers (AES GCM one-shot; CBC/CTR/CFB via CCCryptor; ChaCha20 -> polyfill)
 // ---------------------------------------------------------------------------
 @safe package(secured) bool commonCryptoSupportsCipher(SymmetricAlgorithm algo) {
