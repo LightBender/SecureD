@@ -13,6 +13,7 @@ import secured.provider;
 
 static if (usesOpenSSL) {
 
+import std.conv : to;
 import std.stdio : File;
 import std.string : toStringz;
 import std.exception : enforce;
@@ -20,10 +21,10 @@ import core.memory : GC;
 
 import secured.bindings.openssl;
 import secured.ecc : EccCurve;
-import secured.hash : HashAlgorithm, getHashLength;
+import secured.hash : HashAlgorithm, getHashLength, unsupportedHashMessage;
 import secured.random : random;
-import secured.symmetric : SymmetricAlgorithm, isAeadCipher, getAuthLength;
-import secured.util : CryptographicException, FILE_BUFFER_SIZE;
+import secured.symmetric : SymmetricAlgorithm, isAeadCipher, getAuthLength, getCipherKeyLength, getCipherIVLength, unsupportedCipherMessage;
+import secured.util : CryptographicException, AlgorithmNotSupportedException, FILE_BUFFER_SIZE;
 
 package(secured):
 
@@ -201,18 +202,31 @@ package(secured):
     if ((kdf = EVP_KDF_fetch(null, "hkdf", null)) == null) {
         throw new CryptographicException("Unable to create HKDF function.");
     }
+    // EVP_KDF_fetch returns a reference-counted object that must be freed.
+    scope(exit) {
+        if (kdf !is null) {
+            EVP_KDF_free(kdf);
+        }
+    }
     kctx = EVP_KDF_CTX_new(kdf);
+    if (kctx is null) {
+        throw new CryptographicException("Unable to create HKDF context.");
+    }
     scope(exit) {
         if (kctx !is null) {
             EVP_KDF_CTX_free(kctx);
         }
     }
 
+    // Keep the digest name alive for the duration of the OSSL_PARAM call.
+    // toStringz() returns a temporary that must not be used after the
+    // expression ends; store it in a local first.
     string hashName = getOpenSSLHashAlgorithmString(func);
-    params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)hashName.toStringz(), hashName.length+1);
-    params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt, salt.length);
-    params[2] = OSSL_PARAM_construct_octet_string("key".toStringz(), cast(void*)key, key.length);
-    params[3] = OSSL_PARAM_construct_octet_string("info".toStringz(), cast(void*)info, info.length);
+    auto digestZ = hashName.toStringz();
+    params[0] = OSSL_PARAM_construct_utf8_string("digest".toStringz(), cast(char*)digestZ, 0);
+    params[1] = OSSL_PARAM_construct_octet_string("salt".toStringz(), cast(void*)salt.ptr, salt.length);
+    params[2] = OSSL_PARAM_construct_octet_string("key".toStringz(), cast(void*)key.ptr, key.length);
+    params[3] = OSSL_PARAM_construct_octet_string("info".toStringz(), cast(void*)info.ptr, info.length);
     params[4] = OSSL_PARAM_construct_end();
     if (EVP_KDF_CTX_set_params(kctx, params.ptr) <= 0) {
         throw new CryptographicException("Unable to set the HKDF parameters.");
@@ -273,7 +287,8 @@ package(secured):
         throw new CryptographicException("Cannot initialize the OpenSSL cipher context.");
     }
 
-    if (associatedData !is null && isAeadCipher(algorithm)) {
+    // Treat null and empty AAD identically so encrypt/decrypt stay consistent.
+    if (associatedData.length != 0 && isAeadCipher(algorithm)) {
         int aadLen = 0;
         if (EVP_EncryptUpdate(ctx, null, &aadLen, associatedData.ptr, cast(int)associatedData.length) != 1) {
             throw new CryptographicException("Unable to write bytes to cipher context.");
@@ -392,6 +407,11 @@ RsaKey rsaLoadPrivateKey(ubyte[] privateKey, ubyte[] password) {
 
     ubyte[] pk = cast(ubyte[])privateKey;
     BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+    if (bio is null) {
+        throw new CryptographicException("Unable to create BIO for RSA private key.");
+    }
+    scope(exit) BIO_free_all(bio);
+
     EVP_PKEY* keypair;
     if (password is null) {
         keypair = PEM_read_bio_PrivateKey(bio, null, null, null);
@@ -400,7 +420,9 @@ RsaKey rsaLoadPrivateKey(ubyte[] privateKey, ubyte[] password) {
         pwd = pwd ~ '\0';
         keypair = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
     }
-    BIO_free_all(bio);
+    if (keypair is null) {
+        throw new CryptographicException("Unable to load RSA private key.");
+    }
     return keypair;
 }
 
@@ -410,8 +432,15 @@ RsaKey rsaLoadPublicKey(ubyte[] publicKey) {
 
     ubyte[] pk = cast(ubyte[])publicKey;
     BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+    if (bio is null) {
+        throw new CryptographicException("Unable to create BIO for RSA public key.");
+    }
+    scope(exit) BIO_free_all(bio);
+
     EVP_PKEY* keypair = PEM_read_bio_PUBKEY(bio, null, null, null);
-    BIO_free_all(bio);
+    if (keypair is null) {
+        throw new CryptographicException("Unable to load RSA public key.");
+    }
     return keypair;
 }
 
@@ -421,128 +450,162 @@ void rsaFree(RsaKey keypair) {
     }
 }
 
-ubyte[] rsaSeal(RsaKey keypair, const ubyte[] plaintext, SymmetricAlgorithm algorithm) {
-    ubyte* _encMsg;
-    ubyte* _ek;
-    size_t _ekl;
-    ubyte* _iv;
-    size_t _ivl;
-
-    ubyte** encMsg  = &_encMsg;
-    ubyte** ek      = &_ek;
-    size_t* ekl     = &_ekl;
-    ubyte** iv      = &_iv;
-    size_t* ivl     = &_ivl;
-
-    const ubyte* msg = plaintext.ptr;
-    size_t msgLen    = plaintext.length;
-
-    static if(size_t.sizeof == 8) {
-        size_t maxHeaderL   = 2 + 2 + 4; // 2 bytes ekl, 2 bytes ivl, 4 bytes length
-        size_t maxEKL       = EVP_PKEY_get_size(keypair);
-        size_t maxIVL       = EVP_MAX_IV_LENGTH;
-        size_t maxEncMsgLen = msgLen + EVP_MAX_IV_LENGTH;
-        size_t maxTotalSize = maxHeaderL + maxEKL + maxIVL + maxEncMsgLen;
-
-        size_t encMsgLen = 0;
-        size_t blockLen  = 0;
-
-        *ivl = EVP_MAX_IV_LENGTH;
-
-        ubyte* buffer = cast(ubyte*)GC.malloc(maxTotalSize);
-        if(buffer == null)
-            throw new CryptographicException("Malloc failed.");
-
-        *ek = buffer + maxHeaderL;
-        *iv = buffer + maxHeaderL + maxEKL;
-        *encMsg = buffer + maxHeaderL + maxEKL + maxIVL;
-
-        EVP_CIPHER_CTX *rsaEncryptCtx = EVP_CIPHER_CTX_new();
-        scope(exit) {
-            if (rsaEncryptCtx !is null) {
-                EVP_CIPHER_CTX_free(rsaEncryptCtx);
-            }
-        }
-
-        if(!EVP_SealInit(rsaEncryptCtx, getOpenSslCipher(algorithm), ek, cast(int*)ekl, *iv, &keypair, 1))
-            throw new CryptographicException("CEVP_SealInit failed.");
-
-        if(!EVP_SealUpdate(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen, cast(const ubyte*)msg, cast(int)msgLen))
-            throw new CryptographicException("EVP_SealUpdate failed.");
-        encMsgLen += blockLen;
-
-        if(!EVP_SealFinal(rsaEncryptCtx, *encMsg + encMsgLen, cast(int*)&blockLen))
-            throw new CryptographicException("EVP_SealFinal failed.");
-        encMsgLen += blockLen;
-
-        buffer[0 .. 2] = (cast(ubyte*)ekl)[0..2];
-        buffer[2 .. 4] = (cast(ubyte*)ivl)[0..2];
-
-        ubyte* encMsgLenTemp = cast(ubyte*)(&encMsgLen);
-        buffer[4..8] = encMsgLenTemp[0..4];
-
-        assert(*ekl == maxEKL);
-        assert(*ivl == maxIVL);
-
-        return buffer[0 .. maxHeaderL + maxEKL + maxIVL + encMsgLen];
+private void opensslRequireSealHash(HashAlgorithm hashAlgorithm) {
+    // OpenSSL supports the full SHA-2 / SHA-3 set used by SecureD. Reject only
+    // the sentinel / unsupported enum values so callers get a clear error.
+    switch (hashAlgorithm) {
+        case HashAlgorithm.SHA2_256:
+        case HashAlgorithm.SHA2_384:
+        case HashAlgorithm.SHA2_512:
+        case HashAlgorithm.SHA2_512_224:
+        case HashAlgorithm.SHA2_512_256:
+        case HashAlgorithm.SHA3_224:
+        case HashAlgorithm.SHA3_256:
+        case HashAlgorithm.SHA3_384:
+        case HashAlgorithm.SHA3_512:
+            return;
+        default:
+            throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
     }
-    else
-        assert(0);
 }
 
-ubyte[] rsaOpen(RsaKey keypair, ubyte[] encMessage, SymmetricAlgorithm algorithm) {
-    assert(encMessage.length > 8);
-    static if(size_t.sizeof == 8) {
-        size_t maxHeaderL = 2 + 2 + 4;
-        size_t maxEKL     = EVP_PKEY_get_size(keypair);
-        size_t maxIVL     = EVP_MAX_IV_LENGTH;
+private size_t opensslOaepOverhead(HashAlgorithm hashAlgorithm) {
+    // OAEP overhead is 2 * hashLen + 2.
+    return 2 * getHashLength(hashAlgorithm) + 2;
+}
 
-        ubyte* ek     = encMessage.ptr + maxHeaderL;
-        ubyte[8] temp = 0;
-        temp[0..2]    = encMessage[0..2];
-        int ekl       = (cast(int[])temp)[0];
-
-        ubyte* iv  = encMessage.ptr + maxHeaderL + maxEKL;
-        temp       = 0;
-        temp[0..2] = encMessage[2..4];
-        size_t ivl = (cast(int[])temp)[0];
-
-        ubyte* encMsg    = encMessage.ptr + maxHeaderL + maxEKL + maxIVL;
-        temp             = 0;
-        temp[0..4]       = encMessage[4..8];
-        size_t encMsgLen = (cast(size_t[])temp)[0];
-
-        size_t decLen   = 0;
-        size_t blockLen = 0;
-        ubyte* _decMsg;
-        auto decMsg = &_decMsg;
-        *decMsg = cast(ubyte*)GC.malloc(encMsgLen + ivl);
-        if(decMsg == null) {
-            throw new CryptographicException("Malloc failed.");
-        }
-
-        EVP_CIPHER_CTX *rsaDecryptCtx = EVP_CIPHER_CTX_new();
-        scope(exit) {
-            if (rsaDecryptCtx !is null) {
-                EVP_CIPHER_CTX_free(rsaDecryptCtx);
-            }
-        }
-
-        if(!EVP_OpenInit(rsaDecryptCtx, getOpenSslCipher(algorithm), ek, ekl, iv, keypair))
-            throw new CryptographicException("EVP_OpenInit failed.");
-
-        if(!EVP_OpenUpdate(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen, encMsg, cast(int)encMsgLen))
-            throw new CryptographicException("EVP_OpenUpdate failed.");
-        decLen += blockLen;
-
-        if(!EVP_OpenFinal(rsaDecryptCtx, cast(ubyte*)*decMsg + decLen, cast(int*)&blockLen))
-            throw new CryptographicException("EVP_OpenFinal failed.");
-        decLen += blockLen;
-
-        return (*decMsg)[0 .. decLen];
+private void opensslConfigureOaep(EVP_PKEY_CTX* ctx, HashAlgorithm hashAlgorithm) {
+    opensslRequireSealHash(hashAlgorithm);
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0) {
+        throw new CryptographicException("EVP_PKEY_CTX_set_rsa_padding failed.");
     }
-    else
-        assert(0);
+    auto md = cast(const(EVP_MD)*)getOpenSSLHashAlgorithm(hashAlgorithm);
+    if (EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) <= 0) {
+        throw new CryptographicException("EVP_PKEY_CTX_set_rsa_oaep_md failed.");
+    }
+    if (EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) <= 0) {
+        throw new CryptographicException("EVP_PKEY_CTX_set_rsa_mgf1_md failed.");
+    }
+}
+
+private ubyte[] opensslRsaEncryptWithHash(RsaKey keypair, const ubyte[] inMessage, HashAlgorithm hashAlgorithm) {
+    immutable size_t overhead = opensslOaepOverhead(hashAlgorithm);
+    enforce(inMessage.length <= (EVP_PKEY_get_size(keypair) - overhead),
+        new CryptographicException("Plainttext length exceeds allowance"));
+
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(keypair, null);
+    if (ctx is null) {
+        throw new CryptographicException("EVP_PKEY_CTX_new failed.");
+    }
+    scope(exit) {
+        if (ctx !is null) {
+            EVP_PKEY_CTX_free(ctx);
+        }
+    }
+
+    if (EVP_PKEY_encrypt_init(ctx) <= 0) {
+        throw new CryptographicException("EVP_PKEY_encrypt_init failed.");
+    }
+    opensslConfigureOaep(ctx, hashAlgorithm);
+
+    size_t outlen;
+    if (EVP_PKEY_encrypt(ctx, null, &outlen, inMessage.ptr, inMessage.length) <= 0) {
+        throw new CryptographicException("EVP_PKEY_encrypt failed.");
+    }
+
+    ubyte* out2 = cast(ubyte*)GC.malloc(outlen);
+    if (out2 is null) {
+        throw new CryptographicException("Malloc failed.");
+    }
+    if (EVP_PKEY_encrypt(ctx, out2, &outlen, inMessage.ptr, inMessage.length) <= 0) {
+        throw new CryptographicException("EVP_PKEY_encrypt failed.");
+    }
+    return out2[0 .. outlen];
+}
+
+private ubyte[] opensslRsaDecryptWithHash(RsaKey keypair, const ubyte[] inMessage, HashAlgorithm hashAlgorithm) {
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(keypair, null);
+    if (ctx is null) {
+        throw new CryptographicException("EVP_PKEY_CTX_new failed.");
+    }
+    scope(exit) {
+        if (ctx !is null) {
+            EVP_PKEY_CTX_free(ctx);
+        }
+    }
+
+    if (EVP_PKEY_decrypt_init(ctx) <= 0) {
+        throw new CryptographicException("EVP_PKEY_decrypt_init failed.");
+    }
+    opensslConfigureOaep(ctx, hashAlgorithm);
+
+    size_t outlen;
+    if (EVP_PKEY_decrypt(ctx, null, &outlen, inMessage.ptr, inMessage.length) <= 0) {
+        throw new CryptographicException("EVP_PKEY_decrypt failed.");
+    }
+
+    ubyte* out2 = cast(ubyte*)GC.malloc(outlen);
+    if (out2 is null) {
+        throw new CryptographicException("Malloc failed.");
+    }
+    if (EVP_PKEY_decrypt(ctx, out2, &outlen, inMessage.ptr, inMessage.length) <= 0) {
+        throw new CryptographicException("EVP_PKEY_decrypt failed.");
+    }
+    return out2[0 .. outlen];
+}
+
+ubyte[] rsaSeal(RsaKey keypair, const ubyte[] plaintext, SymmetricAlgorithm algorithm, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+    // Hybrid encryption with explicit OAEP hash selection. EVP_Seal* always uses
+    // RSA PKCS#1 v1.5 for the key wrap, so we assemble the envelope ourselves:
+    // encrypt with the requested symmetric algorithm, then RSA-OAEP wrap the key.
+    opensslRequireSealHash(hashAlgorithm);
+    getOpenSslCipher(algorithm); // validates the cipher enum
+
+    immutable uint keyLen = getCipherKeyLength(algorithm);
+    immutable uint ivLen = getCipherIVLength(algorithm);
+    ubyte[] aesKey = random(keyLen);
+    ubyte[] iv = random(ivLen);
+    ubyte[] tag;
+    ubyte[] ciphertext = encrypt_impl_openssl(plaintext, null, aesKey, iv, tag, algorithm);
+    ubyte[] wrappedKey = opensslRsaEncryptWithHash(keypair, aesKey, hashAlgorithm);
+
+    // Layout: [4-byte wrappedKeyLen][wrappedKey][iv][tagLen:1][tag][ciphertext]
+    // tag is empty for non-AEAD ciphers; AEAD tags are 16 bytes.
+    uint wkl = cast(uint)wrappedKey.length;
+    ubyte[] output;
+    output ~= (cast(ubyte*)&wkl)[0 .. 4];
+    output ~= wrappedKey;
+    output ~= iv;
+    output ~= cast(ubyte)tag.length;
+    output ~= tag;
+    output ~= ciphertext;
+    return output;
+}
+
+ubyte[] rsaOpen(RsaKey keypair, ubyte[] encMessage, SymmetricAlgorithm algorithm, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+    opensslRequireSealHash(hashAlgorithm);
+    getOpenSslCipher(algorithm);
+
+    immutable uint ivLen = getCipherIVLength(algorithm);
+    if (encMessage.length < 4) {
+        throw new CryptographicException("Invalid sealed message.");
+    }
+    uint wkl = *(cast(uint*)encMessage.ptr);
+    size_t off = 4;
+    if (encMessage.length < off + wkl + ivLen + 1) {
+        throw new CryptographicException("Invalid sealed message.");
+    }
+    ubyte[] wrappedKey = encMessage[off .. off + wkl].dup; off += wkl;
+    ubyte[] iv = encMessage[off .. off + ivLen].dup; off += ivLen;
+    immutable size_t tagLen = encMessage[off]; off += 1;
+    if (encMessage.length < off + tagLen) {
+        throw new CryptographicException("Invalid sealed message.");
+    }
+    ubyte[] tag = encMessage[off .. off + tagLen].dup; off += tagLen;
+    ubyte[] ciphertext = encMessage[off .. $].dup;
+
+    ubyte[] aesKey = opensslRsaDecryptWithHash(keypair, wrappedKey, hashAlgorithm);
+    return decrypt_impl_openssl(ciphertext, null, aesKey, iv, tag, algorithm);
 }
 
 ubyte[] rsaGetPublicKey(RsaKey keypair) {
@@ -557,32 +620,49 @@ ubyte[] rsaGetPublicKey(RsaKey keypair) {
     return buffer;
 }
 
-ubyte[] rsaGetPrivateKey(RsaKey keypair, string password, bool use3Des) {
+ubyte[] rsaGetPrivateKey(RsaKey keypair, string password, int iterations, bool use3Des) {
     BIO* bio = BIO_new(BIO_s_mem());
+    if (bio is null) {
+        throw new CryptographicException("Unable to create BIO for RSA private key export.");
+    }
+    scope(exit) BIO_free_all(bio);
 
     if (password is null) {
-        PEM_write_bio_PKCS8PrivateKey(bio, keypair, null, null, 0, null, null);
+        if (PEM_write_bio_PKCS8PrivateKey(bio, keypair, null, null, 0, null, null) != 1) {
+            throw new CryptographicException("Unable to write unencrypted RSA private key.");
+        }
     } else {
+        // PEM_write_bio_PKCS8PrivateKey always uses PKCS5_DEFAULT_ITER (2048).
+        // Reject any other requested count so callers are not silently given a
+        // weaker (or different) work factor than they asked for.
+        if (iterations != PKCS5_DEFAULT_ITER) {
+            throw new CryptographicException(
+                "OpenSSL PKCS#8 private-key encryption only supports " ~
+                to!string(PKCS5_DEFAULT_ITER) ~
+                " PBKDF2 iterations (PKCS5_DEFAULT_ITER); requested " ~
+                to!string(iterations) ~ ".");
+        }
         ubyte[] pwd = cast(ubyte[])password;
         pwd = pwd ~ '\0';
 
-        PEM_write_bio_PKCS8PrivateKey(
-            bio,
-            keypair,
-            !use3Des ? EVP_aes_256_cbc() : EVP_des_ede3_cbc(),
-            null,
-            0,
-            null,
-            pwd.ptr);
+        if (PEM_write_bio_PKCS8PrivateKey(
+                bio,
+                keypair,
+                !use3Des ? EVP_aes_256_cbc() : EVP_des_ede3_cbc(),
+                null,
+                0,
+                null,
+                pwd.ptr) != 1) {
+            throw new CryptographicException("Unable to write encrypted RSA private key.");
+        }
     }
 
-    if(BIO_ctrl_pending(bio) == 0) {
+    if (BIO_ctrl_pending(bio) == 0) {
         throw new CryptographicException("No private key written.");
     }
 
     ubyte[] buffer = new ubyte[BIO_ctrl_pending(bio)];
     BIO_read(bio, buffer.ptr, cast(int)buffer.length);
-    BIO_free_all(bio);
 
     return buffer;
 }
@@ -810,6 +890,11 @@ EccKey eccLoadPrivateKey(string privateKey, string password) {
 
     ubyte[] pk = cast(ubyte[])privateKey;
     BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+    if (bio is null) {
+        throw new CryptographicException("Unable to create BIO for EC private key.");
+    }
+    scope(exit) BIO_free_all(bio);
+
     EVP_PKEY* key;
     if (password is null) {
         key = PEM_read_bio_PrivateKey(bio, null, null, null);
@@ -819,7 +904,9 @@ EccKey eccLoadPrivateKey(string privateKey, string password) {
 
         key = PEM_read_bio_PrivateKey(bio, null, null, pwd.ptr);
     }
-    BIO_free_all(bio);
+    if (key is null) {
+        throw new CryptographicException("Unable to load EC private key.");
+    }
     return key;
 }
 
@@ -829,8 +916,15 @@ EccKey eccLoadPublicKey(string publicKey) {
 
     ubyte[] pk = cast(ubyte[])publicKey;
     BIO* bio = BIO_new_mem_buf(pk.ptr, cast(int)pk.length);
+    if (bio is null) {
+        throw new CryptographicException("Unable to create BIO for EC public key.");
+    }
+    scope(exit) BIO_free_all(bio);
+
     EVP_PKEY* key = PEM_read_bio_PUBKEY(bio, null, null, null);
-    BIO_free_all(bio);
+    if (key is null) {
+        throw new CryptographicException("Unable to load EC public key.");
+    }
     return key;
 }
 

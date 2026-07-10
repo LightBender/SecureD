@@ -25,7 +25,7 @@ import secured.ecc : EccCurve;
 import secured.hash : HashAlgorithm, getHashLength, unsupportedHashMessage;
 import secured.mac : unsupportedHmacMessage;
 import secured.kdf : unsupportedKdfMessage;
-import secured.symmetric : SymmetricAlgorithm, isAeadCipher, getAuthLength;
+import secured.symmetric : SymmetricAlgorithm, isAeadCipher, getAuthLength, getCipherKeyLength, getCipherIVLength, unsupportedCipherMessage;
 import secured.util : CryptographicException, AlgorithmNotSupportedException, FILE_BUFFER_SIZE;
 
 // ---------------------------------------------------------------------------
@@ -351,17 +351,32 @@ private immutable ubyte[8] SD_MAC_RSA_MAGIC = ['S', 'D', 'M', 'A', 'C', 'R', 'S'
     ubyte[] blob;
     if (flag == 0) {
         blob = privateKey[SD_MAC_RSA_MAGIC.length + 1 .. $].dup;
-    } else {
+    } else if (flag == 1 || flag == 2) {
+        // flag 1: fixed 25000 iterations (legacy). flag 2: iterations stored as LE uint32.
         if (password is null) {
             throw new CryptographicException("A password is required to load this private key.");
         }
         size_t off = SD_MAC_RSA_MAGIC.length + 1;
+        uint iterations = 25000;
+        if (flag == 2) {
+            if (privateKey.length < off + 4) {
+                throw new CryptographicException("Invalid macOS RSA private key container.");
+            }
+            iterations = privateKey[off] | (privateKey[off + 1] << 8) |
+                (privateKey[off + 2] << 16) | (privateKey[off + 3] << 24);
+            off += 4;
+        }
+        if (privateKey.length < off + 16 + 12 + 16) {
+            throw new CryptographicException("Invalid macOS RSA private key container.");
+        }
         ubyte[] salt = privateKey[off .. off + 16].dup; off += 16;
         ubyte[] iv   = privateKey[off .. off + 12].dup; off += 12;
         ubyte[] tag  = privateKey[off .. off + 16].dup; off += 16;
         ubyte[] ciphertext = privateKey[off .. $].dup;
-        ubyte[] derived = pbkdf2_impl_commoncrypto(cast(string)password, salt, HashAlgorithm.SHA2_256, 32, 25000);
+        ubyte[] derived = pbkdf2_impl_commoncrypto(cast(string)password, salt, HashAlgorithm.SHA2_256, 32, iterations);
         blob = decrypt_impl_commoncrypto(ciphertext, null, derived, iv, tag, SymmetricAlgorithm.AES256_GCM);
+    } else {
+        throw new CryptographicException("Invalid macOS RSA private key container.");
     }
 
     RsaKey result;
@@ -389,7 +404,7 @@ private immutable ubyte[8] SD_MAC_RSA_MAGIC = ['S', 'D', 'M', 'A', 'C', 'R', 'S'
     return cfDataToBytes(data);
 }
 
-@trusted package(secured) ubyte[] rsaGetPrivateKey(RsaKey key, string password, bool use3Des) {
+@trusted package(secured) ubyte[] rsaGetPrivateKey(RsaKey key, string password, int iterations, bool use3Des) {
     if (!key.hasPrivate) {
         return null;
     }
@@ -409,18 +424,87 @@ private immutable ubyte[8] SD_MAC_RSA_MAGIC = ['S', 'D', 'M', 'A', 'C', 'R', 'S'
     // The Security framework only exports unencrypted PKCS#1, so protect the
     // raw blob with AES-256-GCM under a PBKDF2-SHA256 derived key inside a
     // self-describing container. This mirrors the API's password contract.
+    // flag 1 = legacy fixed 25000 iterations; flag 2 embeds a custom count.
+    if (use3Des) {
+        throw new CryptographicException(
+            "use3Des is not supported by the CommonCrypto/Security backend; AES-256-GCM is used instead.");
+    }
+    if (iterations <= 0) {
+        throw new CryptographicException("PBKDF2 iteration count must be positive.");
+    }
     ubyte[] salt = secRandom(16);
     ubyte[] iv = secRandom(12);
     ubyte[] tag;
-    ubyte[] derived = pbkdf2_impl_commoncrypto(password, salt, HashAlgorithm.SHA2_256, 32, 25000);
+    ubyte[] derived = pbkdf2_impl_commoncrypto(password, salt, HashAlgorithm.SHA2_256, 32, cast(uint)iterations);
     ubyte[] ciphertext = encrypt_impl_commoncrypto(blob, null, derived, iv, tag, SymmetricAlgorithm.AES256_GCM);
-    return SD_MAC_RSA_MAGIC[] ~ cast(ubyte)1 ~ salt ~ iv ~ tag ~ ciphertext;
+    if (iterations == 25000) {
+        return SD_MAC_RSA_MAGIC[] ~ cast(ubyte)1 ~ salt ~ iv ~ tag ~ ciphertext;
+    }
+    ubyte[4] iterBytes = [
+        cast(ubyte)(iterations),
+        cast(ubyte)(iterations >> 8),
+        cast(ubyte)(iterations >> 16),
+        cast(ubyte)(iterations >> 24),
+    ];
+    return SD_MAC_RSA_MAGIC[] ~ cast(ubyte)2 ~ iterBytes[] ~ salt ~ iv ~ tag ~ ciphertext;
+}
+
+private SecKeyAlgorithm macOaepAlgorithm(HashAlgorithm hashAlgorithm) {
+    // SHA-3 OAEP is not available through SecKey; SHA-2 family is.
+    if (!commonCryptoSupportsHash(hashAlgorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
+    switch (hashAlgorithm) {
+        case HashAlgorithm.SHA2_256: return kSecKeyAlgorithmRSAEncryptionOAEPSHA256;
+        case HashAlgorithm.SHA2_384: return kSecKeyAlgorithmRSAEncryptionOAEPSHA384;
+        case HashAlgorithm.SHA2_512: return kSecKeyAlgorithmRSAEncryptionOAEPSHA512;
+        default:
+            throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
+}
+
+private size_t macOaepOverhead(HashAlgorithm hashAlgorithm) {
+    return 2 * getHashLength(hashAlgorithm) + 2;
+}
+
+@trusted package(secured) ubyte[] rsaEncryptWithHash(RsaKey key, const ubyte[] inMessage, HashAlgorithm hashAlgorithm) {
+    SecKeyRef pub = secKeyPublic(key);
+    scope(exit) { if (key.hasPrivate) CFRelease(pub); }
+
+    immutable size_t blockSize = SecKeyGetBlockSize(pub);
+    immutable size_t overhead = macOaepOverhead(hashAlgorithm);
+    enforce(inMessage.length <= (blockSize - overhead), new CryptographicException("Plainttext length exceeds allowance"));
+
+    CFDataRef plain = bytesToCFData(inMessage);
+    scope(exit) CFRelease(plain);
+
+    CFErrorRef error;
+    CFDataRef encrypted = SecKeyCreateEncryptedData(pub, macOaepAlgorithm(hashAlgorithm), plain, &error);
+    if (encrypted is null) {
+        if (error !is null) CFRelease(error);
+        throw new CryptographicException("Unable to RSA-encrypt data with the Security framework.");
+    }
+    return cfDataToBytes(encrypted);
+}
+
+@trusted package(secured) ubyte[] rsaDecryptWithHash(RsaKey key, const ubyte[] inMessage, HashAlgorithm hashAlgorithm) {
+    CFDataRef cipher = bytesToCFData(inMessage);
+    scope(exit) CFRelease(cipher);
+
+    CFErrorRef error;
+    CFDataRef decrypted = SecKeyCreateDecryptedData(key.key, macOaepAlgorithm(hashAlgorithm), cipher, &error);
+    if (decrypted is null) {
+        if (error !is null) CFRelease(error);
+        throw new CryptographicException("Unable to RSA-decrypt data with the Security framework.");
+    }
+    return cfDataToBytes(decrypted);
 }
 
 @trusted package(secured) ubyte[] rsaEncrypt(RsaKey key, const ubyte[] inMessage) {
     SecKeyRef pub = secKeyPublic(key);
     scope(exit) { if (key.hasPrivate) CFRelease(pub); }
 
+    // Legacy direct RSA encrypt keeps OAEP-SHA1 for interop with existing data.
     // 42 bytes is the OAEP overhead for a SHA-1 label (2*20 + 2).
     immutable size_t blockSize = SecKeyGetBlockSize(pub);
     enforce(inMessage.length <= (blockSize - 42), new CryptographicException("Plainttext length exceeds allowance"));
@@ -450,43 +534,64 @@ private immutable ubyte[8] SD_MAC_RSA_MAGIC = ['S', 'D', 'M', 'A', 'C', 'R', 'S'
     return cfDataToBytes(decrypted);
 }
 
-@trusted package(secured) ubyte[] rsaSeal(RsaKey key, const ubyte[] plaintext, SymmetricAlgorithm algorithm) {
-    // Hybrid encryption: encrypt the data with a fresh AES-256-GCM key, then
-    // RSA-OAEP wrap the AES key. AES-256-GCM is always used for the data leg
-    // since the envelope is only ever opened by this same provider.
-    ubyte[] aesKey = secRandom(32);
-    ubyte[] iv = secRandom(12);
-    ubyte[] tag;
-    ubyte[] ciphertext = encrypt_impl_commoncrypto(plaintext, null, aesKey, iv, tag, SymmetricAlgorithm.AES256_GCM);
-    ubyte[] wrappedKey = rsaEncrypt(key, aesKey);
+@trusted package(secured) ubyte[] rsaSeal(RsaKey key, const ubyte[] plaintext, SymmetricAlgorithm algorithm, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+    // Hybrid encryption: encrypt with the requested symmetric algorithm, then
+    // RSA-OAEP wrap the session key using the selected hash.
+    if (!commonCryptoSupportsCipher(algorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
+    }
+    if (!commonCryptoSupportsHash(hashAlgorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
 
-    // Layout: [4-byte wrappedKeyLen][wrappedKey][12-byte iv][16-byte tag][ciphertext]
+    immutable uint keyLen = getCipherKeyLength(algorithm);
+    immutable uint ivLen = getCipherIVLength(algorithm);
+    ubyte[] aesKey = secRandom(keyLen);
+    ubyte[] iv = secRandom(ivLen);
+    ubyte[] tag;
+    ubyte[] ciphertext = encrypt_impl_commoncrypto(plaintext, null, aesKey, iv, tag, algorithm);
+    ubyte[] wrappedKey = rsaEncryptWithHash(key, aesKey, hashAlgorithm);
+
+    // Layout: [4-byte wrappedKeyLen][wrappedKey][iv][tagLen:1][tag][ciphertext]
     uint wkl = cast(uint)wrappedKey.length;
     ubyte[] output;
     output ~= (cast(ubyte*)&wkl)[0 .. 4];
     output ~= wrappedKey;
     output ~= iv;
+    output ~= cast(ubyte)tag.length;
     output ~= tag;
     output ~= ciphertext;
     return output;
 }
 
-@trusted package(secured) ubyte[] rsaOpen(RsaKey key, ubyte[] encMessage, SymmetricAlgorithm algorithm) {
+@trusted package(secured) ubyte[] rsaOpen(RsaKey key, ubyte[] encMessage, SymmetricAlgorithm algorithm, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+    if (!commonCryptoSupportsCipher(algorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
+    }
+    if (!commonCryptoSupportsHash(hashAlgorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
+
+    immutable uint ivLen = getCipherIVLength(algorithm);
     if (encMessage.length < 4) {
         throw new CryptographicException("Invalid sealed message.");
     }
     uint wkl = *(cast(uint*)encMessage.ptr);
     size_t off = 4;
-    if (encMessage.length < off + wkl + 12 + 16) {
+    if (encMessage.length < off + wkl + ivLen + 1) {
         throw new CryptographicException("Invalid sealed message.");
     }
     ubyte[] wrappedKey = encMessage[off .. off + wkl].dup; off += wkl;
-    ubyte[] iv = encMessage[off .. off + 12].dup; off += 12;
-    ubyte[] tag = encMessage[off .. off + 16].dup; off += 16;
+    ubyte[] iv = encMessage[off .. off + ivLen].dup; off += ivLen;
+    immutable size_t tagLen = encMessage[off]; off += 1;
+    if (encMessage.length < off + tagLen) {
+        throw new CryptographicException("Invalid sealed message.");
+    }
+    ubyte[] tag = encMessage[off .. off + tagLen].dup; off += tagLen;
     ubyte[] ciphertext = encMessage[off .. $].dup;
 
-    ubyte[] aesKey = rsaDecrypt(key, wrappedKey);
-    return decrypt_impl_commoncrypto(ciphertext, null, aesKey, iv, tag, SymmetricAlgorithm.AES256_GCM);
+    ubyte[] aesKey = rsaDecryptWithHash(key, wrappedKey, hashAlgorithm);
+    return decrypt_impl_commoncrypto(ciphertext, null, aesKey, iv, tag, algorithm);
 }
 
 @trusted package(secured) ubyte[] rsaSign(RsaKey key, ubyte[] data, bool useSha256) {

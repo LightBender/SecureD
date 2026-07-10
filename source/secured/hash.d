@@ -15,17 +15,39 @@ static if (activeProvider == Provider.CommonCrypto) {
     import secured.system.macos : hash_impl_commoncrypto, commonCryptoSupportsHash;
 }
 
+/**
+ * Cryptographic hash algorithms supported by SecureD.
+ *
+ * Defaults to $(D SHA2_384): a 384-bit SHA-2 digest that is widely available on
+ * every supported OS provider, resists length-extension attacks better than
+ * SHA-256 in truncated-MAC constructions, and provides a comfortable security
+ * margin for long-lived data without the larger cost of SHA-512.
+ *
+ * SHA-3 variants require provider support (OpenSSL always; CNG only on recent
+ * Windows; CommonCrypto requires the polyfill configuration).
+ */
 public enum HashAlgorithm : ubyte {
+    /// Sentinel / unused.
     None,
+    /// SHA-2 with 256-bit output.
     SHA2_256,
+    /// SHA-2 with 384-bit output (library default).
     SHA2_384,
+    /// SHA-2 with 512-bit output.
     SHA2_512,
+    /// SHA-512 truncated to 224 bits.
     SHA2_512_224,
+    /// SHA-512 truncated to 256 bits.
     SHA2_512_256,
+    /// SHA-3 with 224-bit output.
     SHA3_224,
+    /// SHA-3 with 256-bit output.
     SHA3_256,
+    /// SHA-3 with 384-bit output.
     SHA3_384,
+    /// SHA-3 with 512-bit output.
     SHA3_512,
+    /// Default hash: SHA2-384 (length-extension resilience + broad OS support).
 	Default = SHA2_384,
 }
 
@@ -34,15 +56,52 @@ package(secured) string unsupportedHashMessage(HashAlgorithm func) {
     return "Hash algorithm '" ~ to!string(func) ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
 }
 
+/**
+ * Hashes `data` with the library default algorithm ($(D HashAlgorithm.Default),
+ * SHA2-384).
+ *
+ * Params:
+ *   data = Input bytes to hash. May be empty.
+ *
+ * Returns: Digest bytes (48 bytes for the default SHA2-384).
+ *
+ * Throws: $(D AlgorithmNotSupportedException) if the active provider cannot
+ *         perform the default hash and polyfill is disabled.
+ */
 @safe public ubyte[] hash(const ubyte[] data) {
     return hash_ex(data, HashAlgorithm.Default);
 }
 
+/**
+ * Verifies that `test` equals the default hash of `data` using a constant-time
+ * comparison.
+ *
+ * Params:
+ *   test = Expected digest to compare against.
+ *   data = Input bytes that will be hashed with $(D HashAlgorithm.Default).
+ *
+ * Returns: `true` if digests match; `false` otherwise.
+ */
 @safe public bool hash_verify(ubyte[] test, ubyte[] data) {
     ubyte[] hash = hash_ex(data, HashAlgorithm.Default);
     return constantTimeEquality(hash, test);
 }
 
+/**
+ * Hashes `data` with an explicit hash algorithm.
+ *
+ * Params:
+ *   data = Input bytes to hash. May be empty.
+ *   func = Hash algorithm to use. Defaults are not applied here; callers must
+ *          pass a concrete algorithm (use $(D hash) for the library default).
+ *
+ * Returns: Digest bytes whose length is $(D getHashLength(func)).
+ *
+ * Throws:
+ *   $(D AlgorithmNotSupportedException) if `func` is unavailable on the active
+ *   provider and polyfill is disabled.
+ *   $(D CryptographicException) for provider-level failures.
+ */
 @trusted public ubyte[] hash_ex(const ubyte[] data, HashAlgorithm func)
 {
     static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
@@ -70,6 +129,17 @@ package(secured) string unsupportedHashMessage(HashAlgorithm func) {
     }
 }
 
+/**
+ * Verifies that `test` equals the hash of `data` under `func`, using a
+ * constant-time comparison.
+ *
+ * Params:
+ *   test = Expected digest to compare against.
+ *   data = Input bytes that will be hashed.
+ *   func = Hash algorithm used to produce the digest.
+ *
+ * Returns: `true` if digests match; `false` otherwise.
+ */
 @safe public bool hash_verify_ex(const ubyte[] test, const ubyte[] data, HashAlgorithm func) {
     ubyte[] hash = hash_ex(data, func);
     return constantTimeEquality(hash, test);
@@ -121,15 +191,49 @@ unittest {
     });
 }
 
+/**
+ * Hashes the contents of the file at `path` with the library default algorithm
+ * ($(D HashAlgorithm.Default), SHA2-384).
+ *
+ * Params:
+ *   path = Filesystem path of the file to hash.
+ *
+ * Returns: Digest bytes (48 bytes for the default SHA2-384).
+ *
+ * Throws: $(D CryptographicException) if the file cannot be read, or
+ *         $(D AlgorithmNotSupportedException) if the hash is unavailable.
+ */
 @safe public ubyte[] hash(string path) {
     return hash_ex(path, HashAlgorithm.Default);
 }
 
+/**
+ * Verifies that `test` equals the default hash of the file at `path`.
+ *
+ * Params:
+ *   path = Filesystem path of the file to hash.
+ *   test = Expected digest to compare against.
+ *
+ * Returns: `true` if digests match; `false` otherwise.
+ */
 @safe public bool hash_verify(string path, ubyte[] test) {
     ubyte[] hash = hash_ex(path, HashAlgorithm.Default);
     return constantTimeEquality(hash, test);
 }
 
+/**
+ * Hashes the contents of the file at `path` with an explicit hash algorithm.
+ *
+ * Params:
+ *   path = Filesystem path of the file to hash.
+ *   func = Hash algorithm to use.
+ *
+ * Returns: Digest bytes whose length is $(D getHashLength(func)).
+ *
+ * Throws:
+ *   $(D AlgorithmNotSupportedException) if `func` is unavailable.
+ *   $(D CryptographicException) if the file cannot be read or hashing fails.
+ */
 @trusted public ubyte[] hash_ex(string path, HashAlgorithm func)
 {
     static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
@@ -157,6 +261,16 @@ unittest {
     }
 }
 
+/**
+ * Verifies that `test` equals the hash of the file at `path` under `func`.
+ *
+ * Params:
+ *   path = Filesystem path of the file to hash.
+ *   func = Hash algorithm used to produce the digest.
+ *   test = Expected digest to compare against.
+ *
+ * Returns: `true` if digests match; `false` otherwise.
+ */
 @safe public bool hash_verify_ex(string path, HashAlgorithm func, ubyte[] test) {
     ubyte[] hash = hash_ex(path, func);
     return constantTimeEquality(hash, test);

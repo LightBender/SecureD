@@ -4,10 +4,31 @@ import std.stdio;
 
 import secured.provider;
 
+/**
+ * Default I/O buffer size (32 KiB) used when hashing or processing files in
+ * streaming fashion. Chosen as a balance between syscall overhead and memory
+ * use on typical desktop and server workloads.
+ */
 public enum uint FILE_BUFFER_SIZE = 32768;
 
+/**
+ * Base exception for cryptographic failures in SecureD (invalid keys, failed
+ * authentication tags, provider errors, malformed inputs, etc.).
+ *
+ * In debug builds with an OpenSSL-family provider, the constructor also drains
+ * and prints the OpenSSL error queue to aid diagnosis.
+ *
+ * Params:
+ *   message = Human-readable description of the failure.
+ */
 @trusted public class CryptographicException : Exception
 {
+    /**
+     * Constructs the exception with the given message.
+     *
+     * Params:
+     *   message = Human-readable description of the failure.
+     */
     this(string message)
     {
         super(message);
@@ -24,14 +45,25 @@ public enum uint FILE_BUFFER_SIZE = 32768;
     }
 }
 
-/*
+/**
  * Thrown when a requested algorithm is not supported by the active cryptographic
- * provider and the polyfill configuration is not enabled. It derives from
- * CryptographicException so that existing catch(CryptographicException) handlers
- * continue to behave as before.
+ * provider and the polyfill configuration is not enabled.
+ *
+ * Derives from $(D CryptographicException) so existing
+ * `catch (CryptographicException)` handlers continue to work.
+ *
+ * Params:
+ *   message = Description of the unsupported algorithm and how to enable
+ *             polyfill if desired.
  */
 @trusted public class AlgorithmNotSupportedException : CryptographicException
 {
+    /**
+     * Constructs the exception with the given message.
+     *
+     * Params:
+     *   message = Description of the unsupported algorithm.
+     */
     this(string message)
     {
         super(message);
@@ -56,14 +88,32 @@ version (unittest) {
     }
 }
 
+/**
+ * Compares two byte arrays in constant time with respect to their contents.
+ *
+ * Suitable for comparing secrets, MACs, and digests. Length mismatches are
+ * folded into the result without early return, so timing does not reveal
+ * whether lengths matched or where the first differing byte is.
+ *
+ * Params:
+ *   a = First buffer.
+ *   b = Second buffer.
+ *
+ * Returns: `true` if both buffers have the same length and identical contents;
+ *          `false` otherwise.
+ */
 @safe pure public bool constantTimeEquality(const ubyte[] a, const ubyte[] b)
 {
-    if(a.length != b.length)
-        return false;
-
-    int result = 0;
-    for(int i = 0; i < a.length; i++)
-        result |= a[i] ^ b[i];
+    // Do not early-return on length mismatch: that leaks whether the lengths
+    // matched via timing. Always walk the longer buffer; fold the length
+    // difference into the accumulator so a mismatch still returns false.
+    size_t len = a.length < b.length ? b.length : a.length;
+    int result = cast(int)(a.length ^ b.length);
+    for (size_t i = 0; i < len; i++) {
+        ubyte x = i < a.length ? a[i] : 0;
+        ubyte y = i < b.length ? b[i] : 0;
+        result |= x ^ y;
+    }
     return result == 0;
 }
 

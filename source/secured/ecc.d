@@ -5,10 +5,20 @@ import std.stdio;
 import secured.provider;
 import secured.util;
 
+/**
+ * NIST prime elliptic curves supported for ECDH and ECDSA.
+ *
+ * The library default for key generation is $(D P384), which matches the
+ * security level of SHA2-384 (~192-bit classical security) and is widely
+ * available on all SecureD providers.
+ */
 public enum EccCurve
 {
+    /// NIST P-256 (secp256r1); ~128-bit security.
     P256,
+    /// NIST P-384 (secp384r1); ~192-bit security; library default.
     P384,
+    /// NIST P-521 (secp521r1); ~256-bit security.
     P521,
 }
 
@@ -31,56 +41,145 @@ static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.Libr
 
 @trusted:
 
+/**
+ * Provider-agnostic elliptic-curve key wrapper for ECDH key agreement and ECDSA
+ * signatures.
+ *
+ * Key material is held in an opaque provider-specific context and released in
+ * the destructor.
+ */
 public class EllipticCurve
 {
     private EccKey key;
 
     private bool _hasPrivateKey;
+    /**
+     * Whether this instance holds a private key.
+     *
+     * Returns: `true` if derive (as initiator with private key), sign, and
+     *          private-key export are available.
+     */
     public @property bool hasPrivateKey() { return _hasPrivateKey; }
 
+    /**
+     * Generates a new elliptic-curve keypair on the given curve.
+     *
+     * Params:
+     *   curve = NIST curve to use. Default: $(D EccCurve.P384), chosen to match
+     *           the security level of SHA2-384 and for broad OS support.
+     */
     public this(EccCurve curve = EccCurve.P384)
     {
         key = eccGenerate(curve);
         _hasPrivateKey = true;
     }
 
+    /**
+     * Loads an ECC private key from a serialized string (PEM/provider format).
+     *
+     * Params:
+     *   privateKey = Serialized private key (as produced by $(D getPrivateKey)).
+     *   password   = Password used to decrypt the key container, or empty/null
+     *                if unencrypted.
+     */
     public this(string privateKey, string password)
     {
         key = eccLoadPrivateKey(privateKey, password);
         _hasPrivateKey = true;
     }
 
+    /**
+     * Loads an ECC public key only (no private key).
+     *
+     * Params:
+     *   publicKey = Serialized public key (as produced by $(D getPublicKey)).
+     */
     public this(string publicKey)
     {
         key = eccLoadPublicKey(publicKey);
         _hasPrivateKey = false;
     }
 
+    /// Releases the underlying provider key material.
     public ~this()
     {
         eccFree(key);
     }
 
+    /**
+     * Performs ECDH key agreement with a peer's public key.
+     *
+     * Params:
+     *   peerKey = Peer's serialized public key (same curve as this key).
+     *
+     * Returns: Shared secret bytes (raw ECDH output; apply a KDF such as HKDF
+     *          before using as a symmetric key).
+     *
+     * Throws: $(D CryptographicException) if agreement fails or no private key.
+     */
     public ubyte[] derive(string peerKey)
     {
         return eccDerive(key, peerKey);
     }
 
+    /**
+     * Signs `data` with ECDSA over a hash of the message.
+     *
+     * Params:
+     *   data      = Message bytes to sign.
+     *   useSha256 = If `true`, hash with SHA-256; if `false` (default), hash
+     *               with SHA-384 to align with P-384 and the library-wide
+     *               SHA2-384 preference.
+     *
+     * Returns: DER or provider-format signature bytes.
+     *
+     * Throws: $(D CryptographicException) if no private key or signing fails.
+     */
     public ubyte[] sign(ubyte[] data, bool useSha256 = false)
     {
         return eccSign(key, data, useSha256);
     }
 
+    /**
+     * Verifies an ECDSA signature over `data`.
+     *
+     * Params:
+     *   data      = Message bytes that were signed.
+     *   signature = Signature from $(D sign).
+     *   useSha256 = Must match the hash used when signing. Default: `false`
+     *               (SHA-384).
+     *
+     * Returns: `true` if the signature is valid; `false` otherwise.
+     */
     public bool verify(ubyte[] data, ubyte[] signature, bool useSha256 = false)
     {
         return eccVerify(key, data, signature, useSha256);
     }
 
+    /**
+     * Exports the public key as a serialized string (PEM/provider format).
+     *
+     * Returns: Public key string suitable for $(D EllipticCurve.this(string))
+     *          or $(D derive).
+     */
     public string getPublicKey()
     {
         return eccGetPublicKey(key);
     }
 
+    /**
+     * Exports the private key, optionally password-encrypted.
+     *
+     * Params:
+     *   password = Password to encrypt the private key container. Empty/null may
+     *              yield an unencrypted export depending on the provider.
+     *   use3Des  = If `true`, request 3DES for PEM encryption where supported
+     *              (OpenSSL). Default: `false` because 3DES is obsolete; AES is
+     *              preferred. Other backends may ignore or reject this flag.
+     *
+     * Returns: Serialized private key string, or `null` if this instance has no
+     *          private key.
+     */
     public string getPrivateKey(string password, bool use3Des = false)
     {
         if (!_hasPrivateKey) {

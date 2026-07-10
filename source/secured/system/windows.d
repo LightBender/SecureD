@@ -19,7 +19,7 @@ import std.stdio : File;
 import secured.bindings.cng;
 import secured.ecc : EccCurve;
 import secured.hash : HashAlgorithm, getHashLength, unsupportedHashMessage;
-import secured.symmetric : SymmetricAlgorithm, isAeadCipher, getAuthLength;
+import secured.symmetric : SymmetricAlgorithm, isAeadCipher, getAuthLength, getCipherKeyLength, getCipherIVLength, unsupportedCipherMessage;
 import secured.util : CryptographicException, AlgorithmNotSupportedException, FILE_BUFFER_SIZE;
 
 // ---------------------------------------------------------------------------
@@ -234,7 +234,9 @@ private wstring cngChainMode(SymmetricAlgorithm algo) {
 
     ULONG resultLen;
     if (isAeadCipher(algorithm)) {
-        BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
+        // Zero-initialize so unused AEAD fields (pbMacContext, cbAAD, etc.) are
+        // not left with stack garbage that CNG may interpret.
+        BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO.init;
         authInfo.cbSize = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO.sizeof;
         authInfo.dwInfoVersion = 1;
         authInfo.pbNonce = cast(PUCHAR)iv.ptr;
@@ -276,7 +278,8 @@ private wstring cngChainMode(SymmetricAlgorithm algo) {
 
     ULONG resultLen;
     if (isAeadCipher(algorithm)) {
-        BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo;
+        // Zero-initialize so unused AEAD fields are not left with stack garbage.
+        BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO authInfo = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO.init;
         authInfo.cbSize = BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO.sizeof;
         authInfo.dwInfoVersion = 1;
         authInfo.pbNonce = cast(PUCHAR)iv.ptr;
@@ -398,17 +401,32 @@ private immutable ubyte[8] SD_CNG_RSA_MAGIC = ['S', 'D', 'C', 'N', 'G', 'R', 'S'
     ubyte[] blob;
     if (flag == 0) {
         blob = privateKey[SD_CNG_RSA_MAGIC.length + 1 .. $].dup;
-    } else {
+    } else if (flag == 1 || flag == 2) {
+        // flag 1: fixed 25000 iterations (legacy). flag 2: iterations stored as LE uint32.
         if (password is null) {
             throw new CryptographicException("A password is required to load this private key.");
         }
         size_t off = SD_CNG_RSA_MAGIC.length + 1;
+        uint iterations = 25000;
+        if (flag == 2) {
+            if (privateKey.length < off + 4) {
+                throw new CryptographicException("Invalid CNG RSA private key container.");
+            }
+            iterations = privateKey[off] | (privateKey[off + 1] << 8) |
+                (privateKey[off + 2] << 16) | (privateKey[off + 3] << 24);
+            off += 4;
+        }
+        if (privateKey.length < off + 16 + 12 + 16) {
+            throw new CryptographicException("Invalid CNG RSA private key container.");
+        }
         ubyte[] salt = privateKey[off .. off + 16].dup; off += 16;
         ubyte[] iv   = privateKey[off .. off + 12].dup; off += 12;
         ubyte[] tag  = privateKey[off .. off + 16].dup; off += 16;
         ubyte[] ciphertext = privateKey[off .. $].dup;
-        ubyte[] derived = pbkdf2_impl_cng(cast(string)password, salt, HashAlgorithm.SHA2_256, 32, 25000);
+        ubyte[] derived = pbkdf2_impl_cng(cast(string)password, salt, HashAlgorithm.SHA2_256, 32, iterations);
         blob = decrypt_impl_cng(ciphertext, null, derived, iv, tag, SymmetricAlgorithm.AES256_GCM);
+    } else {
+        throw new CryptographicException("Invalid CNG RSA private key container.");
     }
 
     RsaKey key;
@@ -436,7 +454,7 @@ private immutable ubyte[8] SD_CNG_RSA_MAGIC = ['S', 'D', 'C', 'N', 'G', 'R', 'S'
     return cngExportBlob(key.hKey, BCRYPT_RSAPUBLIC_BLOB.ptr);
 }
 
-@trusted package(secured) ubyte[] rsaGetPrivateKey(RsaKey key, string password, bool use3Des) {
+@trusted package(secured) ubyte[] rsaGetPrivateKey(RsaKey key, string password, int iterations, bool use3Des) {
     if (!key.hasPrivate) {
         return null;
     }
@@ -450,15 +468,87 @@ private immutable ubyte[8] SD_CNG_RSA_MAGIC = ['S', 'D', 'C', 'N', 'G', 'R', 'S'
     // CNG has no PKCS#8 encryption primitive, so protect the raw blob with
     // AES-256-GCM under a PBKDF2-SHA256 derived key inside a self-describing
     // container. This mirrors the password-protection contract of the API.
+    // flag 1 = legacy fixed 25000 iterations; flag 2 embeds a custom count.
+    if (use3Des) {
+        throw new CryptographicException(
+            "use3Des is not supported by the CNG backend; AES-256-GCM is used instead.");
+    }
+    if (iterations <= 0) {
+        throw new CryptographicException("PBKDF2 iteration count must be positive.");
+    }
     ubyte[] salt = cngRandom(16);
     ubyte[] iv = cngRandom(12);
     ubyte[] tag;
-    ubyte[] derived = pbkdf2_impl_cng(password, salt, HashAlgorithm.SHA2_256, 32, 25000);
+    ubyte[] derived = pbkdf2_impl_cng(password, salt, HashAlgorithm.SHA2_256, 32, cast(uint)iterations);
     ubyte[] ciphertext = encrypt_impl_cng(blob, null, derived, iv, tag, SymmetricAlgorithm.AES256_GCM);
-    return SD_CNG_RSA_MAGIC[] ~ cast(ubyte)1 ~ salt ~ iv ~ tag ~ ciphertext;
+    if (iterations == 25000) {
+        return SD_CNG_RSA_MAGIC[] ~ cast(ubyte)1 ~ salt ~ iv ~ tag ~ ciphertext;
+    }
+    ubyte[4] iterBytes = [
+        cast(ubyte)(iterations),
+        cast(ubyte)(iterations >> 8),
+        cast(ubyte)(iterations >> 16),
+        cast(ubyte)(iterations >> 24),
+    ];
+    return SD_CNG_RSA_MAGIC[] ~ cast(ubyte)2 ~ iterBytes[] ~ salt ~ iv ~ tag ~ ciphertext;
+}
+
+private const(wchar)* cngOaepHashAlgId(HashAlgorithm hashAlgorithm) {
+    // OAEP for seal uses SHA-2 / SHA-3. SHA-1 remains only for the legacy
+    // rsaEncrypt/rsaDecrypt path for interop.
+    if (!cngSupportsHash(hashAlgorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
+    return getCngHashAlgId(hashAlgorithm);
+}
+
+private size_t cngOaepOverhead(HashAlgorithm hashAlgorithm) {
+    return 2 * getHashLength(hashAlgorithm) + 2;
+}
+
+@trusted package(secured) ubyte[] rsaEncryptWithHash(RsaKey key, const ubyte[] inMessage, HashAlgorithm hashAlgorithm) {
+    immutable size_t overhead = cngOaepOverhead(hashAlgorithm);
+    enforce(inMessage.length <= (key.keyBits / 8 - overhead), new CryptographicException("Plainttext length exceeds allowance"));
+
+    BCRYPT_OAEP_PADDING_INFO pad;
+    pad.pszAlgId = cngOaepHashAlgId(hashAlgorithm);
+    pad.pbLabel = null;
+    pad.cbLabel = 0;
+
+    ULONG cb;
+    if (BCryptEncrypt(key.hKey, cast(PUCHAR)inMessage.ptr, cast(ULONG)inMessage.length, &pad, null, 0,
+            null, 0, &cb, BCRYPT_PAD_OAEP) != STATUS_SUCCESS) {
+        throw new CryptographicException("Unable to size the CNG RSA ciphertext.");
+    }
+    ubyte[] output = new ubyte[cb];
+    if (BCryptEncrypt(key.hKey, cast(PUCHAR)inMessage.ptr, cast(ULONG)inMessage.length, &pad, null, 0,
+            output.ptr, cb, &cb, BCRYPT_PAD_OAEP) != STATUS_SUCCESS) {
+        throw new CryptographicException("Unable to RSA-encrypt data with CNG.");
+    }
+    return output[0 .. cb];
+}
+
+@trusted package(secured) ubyte[] rsaDecryptWithHash(RsaKey key, const ubyte[] inMessage, HashAlgorithm hashAlgorithm) {
+    BCRYPT_OAEP_PADDING_INFO pad;
+    pad.pszAlgId = cngOaepHashAlgId(hashAlgorithm);
+    pad.pbLabel = null;
+    pad.cbLabel = 0;
+
+    ULONG cb;
+    if (BCryptDecrypt(key.hKey, cast(PUCHAR)inMessage.ptr, cast(ULONG)inMessage.length, &pad, null, 0,
+            null, 0, &cb, BCRYPT_PAD_OAEP) != STATUS_SUCCESS) {
+        throw new CryptographicException("Unable to size the CNG RSA plaintext.");
+    }
+    ubyte[] output = new ubyte[cb];
+    if (BCryptDecrypt(key.hKey, cast(PUCHAR)inMessage.ptr, cast(ULONG)inMessage.length, &pad, null, 0,
+            output.ptr, cb, &cb, BCRYPT_PAD_OAEP) != STATUS_SUCCESS) {
+        throw new CryptographicException("Unable to RSA-decrypt data with CNG.");
+    }
+    return output[0 .. cb];
 }
 
 @trusted package(secured) ubyte[] rsaEncrypt(RsaKey key, const ubyte[] inMessage) {
+    // Legacy direct RSA encrypt keeps OAEP-SHA1 for interop with existing data.
     // 42 bytes is the OAEP overhead for a SHA-1 label (2*20 + 2).
     enforce(inMessage.length <= (key.keyBits / 8 - 42), new CryptographicException("Plainttext length exceeds allowance"));
 
@@ -499,44 +589,64 @@ private immutable ubyte[8] SD_CNG_RSA_MAGIC = ['S', 'D', 'C', 'N', 'G', 'R', 'S'
     return output[0 .. cb];
 }
 
-@trusted package(secured) ubyte[] rsaSeal(RsaKey key, const ubyte[] plaintext, SymmetricAlgorithm algorithm) {
-    // Hybrid encryption: encrypt the data with a fresh AES-256-GCM key, then
-    // RSA-OAEP wrap the AES key. CNG has no EVP_Seal equivalent so the envelope
-    // is assembled here. AES-256-GCM is always used for the data leg since the
-    // envelope is only ever opened by this same provider.
-    ubyte[] aesKey = cngRandom(32);
-    ubyte[] iv = cngRandom(12);
-    ubyte[] tag;
-    ubyte[] ciphertext = encrypt_impl_cng(plaintext, null, aesKey, iv, tag, SymmetricAlgorithm.AES256_GCM);
-    ubyte[] wrappedKey = rsaEncrypt(key, aesKey);
+@trusted package(secured) ubyte[] rsaSeal(RsaKey key, const ubyte[] plaintext, SymmetricAlgorithm algorithm, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+    // Hybrid encryption: encrypt with the requested symmetric algorithm, then
+    // RSA-OAEP wrap the session key using the selected hash.
+    if (!cngSupportsCipher(algorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
+    }
+    if (!cngSupportsHash(hashAlgorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
 
-    // Layout: [4-byte wrappedKeyLen][wrappedKey][12-byte iv][16-byte tag][ciphertext]
+    immutable uint keyLen = getCipherKeyLength(algorithm);
+    immutable uint ivLen = getCipherIVLength(algorithm);
+    ubyte[] aesKey = cngRandom(keyLen);
+    ubyte[] iv = cngRandom(ivLen);
+    ubyte[] tag;
+    ubyte[] ciphertext = encrypt_impl_cng(plaintext, null, aesKey, iv, tag, algorithm);
+    ubyte[] wrappedKey = rsaEncryptWithHash(key, aesKey, hashAlgorithm);
+
+    // Layout: [4-byte wrappedKeyLen][wrappedKey][iv][tagLen:1][tag][ciphertext]
     uint wkl = cast(uint)wrappedKey.length;
     ubyte[] output;
     output ~= (cast(ubyte*)&wkl)[0 .. 4];
     output ~= wrappedKey;
     output ~= iv;
+    output ~= cast(ubyte)tag.length;
     output ~= tag;
     output ~= ciphertext;
     return output;
 }
 
-@trusted package(secured) ubyte[] rsaOpen(RsaKey key, ubyte[] encMessage, SymmetricAlgorithm algorithm) {
+@trusted package(secured) ubyte[] rsaOpen(RsaKey key, ubyte[] encMessage, SymmetricAlgorithm algorithm, HashAlgorithm hashAlgorithm = HashAlgorithm.Default) {
+    if (!cngSupportsCipher(algorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedCipherMessage(algorithm));
+    }
+    if (!cngSupportsHash(hashAlgorithm)) {
+        throw new AlgorithmNotSupportedException(unsupportedHashMessage(hashAlgorithm));
+    }
+
+    immutable uint ivLen = getCipherIVLength(algorithm);
     if (encMessage.length < 4) {
         throw new CryptographicException("Invalid sealed message.");
     }
     uint wkl = *(cast(uint*)encMessage.ptr);
     size_t off = 4;
-    if (encMessage.length < off + wkl + 12 + 16) {
+    if (encMessage.length < off + wkl + ivLen + 1) {
         throw new CryptographicException("Invalid sealed message.");
     }
     ubyte[] wrappedKey = encMessage[off .. off + wkl].dup; off += wkl;
-    ubyte[] iv = encMessage[off .. off + 12].dup; off += 12;
-    ubyte[] tag = encMessage[off .. off + 16].dup; off += 16;
+    ubyte[] iv = encMessage[off .. off + ivLen].dup; off += ivLen;
+    immutable size_t tagLen = encMessage[off]; off += 1;
+    if (encMessage.length < off + tagLen) {
+        throw new CryptographicException("Invalid sealed message.");
+    }
+    ubyte[] tag = encMessage[off .. off + tagLen].dup; off += tagLen;
     ubyte[] ciphertext = encMessage[off .. $].dup;
 
-    ubyte[] aesKey = rsaDecrypt(key, wrappedKey);
-    return decrypt_impl_cng(ciphertext, null, aesKey, iv, tag, SymmetricAlgorithm.AES256_GCM);
+    ubyte[] aesKey = rsaDecryptWithHash(key, wrappedKey, hashAlgorithm);
+    return decrypt_impl_cng(ciphertext, null, aesKey, iv, tag, algorithm);
 }
 
 @trusted package(secured) ubyte[] rsaSign(RsaKey key, ubyte[] data, bool useSha256) {

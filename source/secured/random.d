@@ -20,6 +20,22 @@ extern(C) @nogc nothrow private @system
     void arc4random_buf(scope void* buf, size_t nbytes);
 }
 
+/**
+ * Generates cryptographically secure random bytes from the operating system's
+ * CSPRNG.
+ *
+ * On Windows this uses `CryptGenRandom`; on POSIX it reads `/dev/urandom` (or
+ * `arc4random_buf` on platforms that provide a secure arc4random). Short reads
+ * are retried until the full request is satisfied.
+ *
+ * Params:
+ *   bytes = Number of random bytes to produce. Must be greater than zero.
+ *
+ * Returns: A newly allocated buffer of exactly `bytes` random octets.
+ *
+ * Throws: $(D CryptographicException) if `bytes` is zero or the system RNG
+ *         cannot be initialized / read.
+ */
 @trusted public ubyte[] random(uint bytes)
 {
     if (bytes == 0) {
@@ -43,9 +59,20 @@ extern(C) @nogc nothrow private @system
             urandom.setvbuf(null, _IONBF);
             scope(exit) urandom.close();
 
-            //Read into the buffer
+            //Read into the buffer. rawRead may return a short slice, so loop
+            //until the full request is satisfied or the device fails.
             try {
-                buffer = urandom.rawRead(buffer);
+                size_t filled = 0;
+                while (filled < bytes) {
+                    auto chunk = urandom.rawRead(buffer[filled .. $]);
+                    if (chunk.length == 0) {
+                        throw new CryptographicException("Cannot get the next random bytes. Short read from /dev/urandom.");
+                    }
+                    filled += chunk.length;
+                }
+            }
+            catch(CryptographicException ex) {
+                throw ex;
             }
             catch(ErrnoException ex) {
                 throw new CryptographicException(format("Cannot get the next random bytes. Error ID: %d, Message: %s", ex.errno, ex.msg));

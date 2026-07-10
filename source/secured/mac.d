@@ -17,19 +17,67 @@ static if (activeProvider == Provider.CommonCrypto) {
     import secured.system.macos : hmac_impl_commoncrypto, commonCryptoSupportsHash;
 }
 
+/**
+ * Computes an HMAC over `data` using the library default hash
+ * ($(D HashAlgorithm.Default), SHA2-384).
+ *
+ * SHA2-384 is the default because it is available on every supported OS
+ * provider and, as a truncated SHA-512 construction, is not vulnerable to the
+ * classic length-extension attacks that affect unkeyed SHA-256 digests.
+ *
+ * Params:
+ *   key  = Secret HMAC key. Must be non-empty; any length is accepted (keys
+ *          longer than the hash block size are reduced per RFC 2104).
+ *   data = Message bytes to authenticate. May be empty.
+ *
+ * Returns: HMAC tag (48 bytes for the default SHA2-384).
+ *
+ * Throws: $(D CryptographicException) if `key` is empty, or
+ *         $(D AlgorithmNotSupportedException) if the hash is unavailable.
+ */
 @safe public ubyte[] hmac(const ubyte[] key, const ubyte[] data) {
     return hmac_ex(key, data, HashAlgorithm.Default);
 }
 
+/**
+ * Verifies an HMAC tag against `data` using the library default hash and a
+ * constant-time comparison.
+ *
+ * Params:
+ *   test = Expected HMAC tag.
+ *   key  = Secret HMAC key (must be non-empty).
+ *   data = Message bytes that were authenticated.
+ *
+ * Returns: `true` if the tag is valid; `false` otherwise.
+ */
 @safe public bool hmac_verify(const ubyte[] test, const ubyte[] key, const ubyte[] data) {
     ubyte[] hash = hmac_ex(key, data, HashAlgorithm.Default);
     return constantTimeEquality(test, hash);
 }
 
+/**
+ * Computes an HMAC over `data` with an explicit underlying hash algorithm.
+ *
+ * Params:
+ *   key  = Secret HMAC key. Must be non-empty; any length is accepted.
+ *   data = Message bytes to authenticate. May be empty.
+ *   func = Hash algorithm used inside HMAC (e.g. SHA2-256, SHA2-384, SHA3-256).
+ *
+ * Returns: HMAC tag whose length matches the digest size of `func`.
+ *
+ * Throws:
+ *   $(D CryptographicException) if `key` is empty.
+ *   $(D AlgorithmNotSupportedException) if `func` is unavailable on the active
+ *   provider and polyfill is disabled.
+ */
 @trusted public ubyte[] hmac_ex(const ubyte[] key, const ubyte[] data, HashAlgorithm func)
 {
-    if (key.length > getHashLength(func)) {
-        throw new CryptographicException(format("HMAC key must be less than or equal to %s bytes in length.", getHashLength(func)));
+    // HMAC keys may be any length. Keys longer than the hash block size are
+    // reduced by the underlying provider (HMAC-Hash(K) as the effective key).
+    // Rejecting long keys was incorrect and broke legitimate uses such as
+    // encrypt-then-MAC over concatenated digests.
+    if (key.length == 0) {
+        throw new CryptographicException("HMAC key must not be empty.");
     }
 
     static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
@@ -62,6 +110,18 @@ package(secured) string unsupportedHmacMessage(HashAlgorithm func) {
     return "HMAC algorithm '" ~ to!string(func) ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
 }
 
+/**
+ * Verifies an HMAC tag against `data` under an explicit hash algorithm, using a
+ * constant-time comparison.
+ *
+ * Params:
+ *   test = Expected HMAC tag.
+ *   key  = Secret HMAC key (must be non-empty).
+ *   data = Message bytes that were authenticated.
+ *   func = Hash algorithm used inside HMAC (must match the tag producer).
+ *
+ * Returns: `true` if the tag is valid; `false` otherwise.
+ */
 @safe public bool hmac_verify_ex(const ubyte[] test, const ubyte[] key, const ubyte[] data, HashAlgorithm func){
     ubyte[] hash = hmac_ex(key, data, func);
     return constantTimeEquality(test, hash);

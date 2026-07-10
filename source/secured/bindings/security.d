@@ -81,6 +81,9 @@ extern __gshared CFStringRef kSecAttrKeyClassPrivate;
 
 // SecKeyAlgorithm identifiers (CFStringRef globals).
 extern __gshared SecKeyAlgorithm kSecKeyAlgorithmRSAEncryptionOAEPSHA1;
+extern __gshared SecKeyAlgorithm kSecKeyAlgorithmRSAEncryptionOAEPSHA256;
+extern __gshared SecKeyAlgorithm kSecKeyAlgorithmRSAEncryptionOAEPSHA384;
+extern __gshared SecKeyAlgorithm kSecKeyAlgorithmRSAEncryptionOAEPSHA512;
 extern __gshared SecKeyAlgorithm kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256;
 extern __gshared SecKeyAlgorithm kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA384;
 extern __gshared SecKeyAlgorithm kSecKeyAlgorithmECDSASignatureMessageX962SHA256;

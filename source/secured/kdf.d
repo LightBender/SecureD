@@ -22,62 +22,94 @@ static if (activeProvider == Provider.CommonCrypto) {
     import secured.system.macos : pbkdf2_impl_commoncrypto, commonCryptoSupportsHash;
 }
 
+/**
+ * Default PBKDF2 iteration count and scrypt CPU/memory cost parameter N
+ * ($(D 2^^20) = 1_048_576). Chosen as a high work factor that remains practical
+ * on modern hardware while resisting offline password guessing.
+ */
 public enum uint defaultKdfIterations = 1_048_576;
+
+/**
+ * Default scrypt block size parameter `r`. The value 8 is the widely recommended
+ * scrypt profile (memory ≈ 128·N·r bytes with N = $(D defaultKdfIterations)).
+ */
 public enum ushort defaultSCryptR = 8;
+
+/**
+ * Default scrypt parallelization parameter `p`. The value 1 is the common
+ * single-lane profile used with r = 8.
+ */
 public enum ushort defaultSCryptP = 1;
+
+/**
+ * Upper bound on scrypt memory usage (bytes) passed to the OpenSSL implementation
+ * as a safety limit (~1 GiB). Prevents pathological (N, r, p) combinations from
+ * exhausting process memory.
+ */
 public enum ulong maxSCryptMemory = 1_074_790_400;
 
+/**
+ * Key-derivation algorithms available for password hashing and key stretching.
+ *
+ * The library default is $(D SCrypt): memory-hard, widely reviewed, and a strong
+ * choice for password storage. PBKDF2 remains available for interoperability.
+ * HKDF is for deriving keys from high-entropy material, not for password hashing.
+ * Argon2 is reserved but not yet implemented.
+ */
 public enum KdfAlgorithm : ubyte {
+    /// Sentinel / unused.
     None = 0,
+    /// PBKDF2-HMAC with a configurable hash (default SHA2-384).
     PBKDF2 = 1,
+    /// HKDF (RFC 5869); not valid for password storage APIs.
     HKDF = 2,
+    /// scrypt (memory-hard); library default for password security.
     SCrypt = 3,
+    /// Reserved; not currently implemented.
     Argon2 = 4,
+    /// Default password KDF: scrypt (memory-hard, strong offline resistance).
     Default = SCrypt,
 }
 
+/**
+ * Result of verifying a stored password hash against a supplied password.
+ */
 public enum VerifyPasswordResult
 {
-    /// <summary>
     /// The password verification was successful.
-    /// </summary>
     Success,
-    /// <summary>
     /// The password verification failed.
-    /// </summary>
     Failure,
-    /// <summary>
-    /// The password was successfully verified, but needs to be rehashed to use updated hashing parameters.
-    /// </summary>
+    /// The password matched, but the stored parameters are outdated and the
+    /// password should be rehashed with current defaults.
     Rehash,
 }
 
+/**
+ * Encoded password hash: algorithm, parameter version, salt, and derived key.
+ *
+ * Serialized form is `algorithm.version.saltB64.derivedB64` (dot-separated).
+ */
 @safe public struct HashedPassword
 {
-    /// <summary>
-    /// The hashing algorithm used to secure the password.
-    /// </summary>
+    /// The KDF used to secure the password.
     public KdfAlgorithm algorithm;
-    /// <summary>
-    /// The version of the hash parameters used to secure the password.
-    /// </summary>
+    /// Version of the hash parameters (used to signal rehash needs).
     public short parameterVersion;
-    /// <summary>
-    /// The salt used by the hashing function.
-    /// </summary>
+    /// Random salt used by the KDF (does not include the application pepper).
     public ubyte[] salt;
-    /// <summary>
-    /// The hashed password
-    /// </summary>
+    /// Derived key / password hash bytes.
     public ubyte[] derived;
 
-    /// <summary>
-    /// Constructs a HashedPassword object from the provided hashing parameters.
-    /// </summary>
-    /// <param name="derived">The hashed password.</param>
-    /// <param name="salt">The salt used by the hashing function.</param>
-    /// <param name="algorithm">The hashing algorithm used to secure the password.</param>
-    /// <param name="paramVersion">The version of the hash parameters used to secure the password.</param>
+    /**
+     * Constructs a HashedPassword from hashing parameters (package use).
+     *
+     * Params:
+     *   derived      = The hashed password / derived key.
+     *   salt         = The salt used by the hashing function.
+     *   algorithm    = The KDF used to secure the password.
+     *   paramVersion = Parameter-set version for rehash detection.
+     */
     package this(ubyte[] derived, ubyte[] salt, KdfAlgorithm algorithm, ushort paramVersion)
     {
         this.algorithm = algorithm;
@@ -86,12 +118,16 @@ public enum VerifyPasswordResult
         this.derived = derived;
     }
 
-    /// <summary>
-    /// Constructs a HashedPassword from an encoded string.
-    /// </summary>
-    /// <param name="encoded">The encoded string.</param>
-    /// <returns>A HashedPassword object containing the decoded string values.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">The provided string is invalid.</exception>
+    /**
+     * Constructs a HashedPassword from an encoded string produced by
+     * $(D toString).
+     *
+     * Params:
+     *   encoded = Dot-separated encoding: algorithm, version, Base64 salt,
+     *             Base64 derived key.
+     *
+     * Throws: $(D CryptographicException) if the string is malformed.
+     */
     public this(string encoded) {
         auto parts = encoded.split(".");
         if (parts.length != 4) throw new CryptographicException("Invalid password string provided.");
@@ -102,15 +138,40 @@ public enum VerifyPasswordResult
         this.derived = Base64.decode(parts[3]);
     }
 
-    /// <summary>
-    /// Creates string containing the encoded password from the HashedPassword.
-    /// </summary>
-    /// <returns>The encoded password string</returns>
+    /**
+     * Encodes this password hash for storage.
+     *
+     * Returns: Dot-separated string of algorithm, version, Base64 salt, and
+     *          Base64 derived key.
+     */
     public string toString() {
         return to!string(join([to!string(to!int(algorithm)), to!string(parameterVersion), Base64.encode(salt), Base64.encode(derived)], "."));
     }
 }
 
+/**
+ * Hashes a password for storage using a random salt and optional application
+ * pepper.
+ *
+ * A fresh 32-byte salt is generated per call. The pepper is concatenated with
+ * the salt before derivation so a server-side secret can harden stored hashes
+ * without changing the public encoding format.
+ *
+ * Default algorithm is $(D KdfAlgorithm.SCrypt) (memory-hard). PBKDF2 uses
+ * $(D HashAlgorithm.Default) (SHA2-384) and $(D defaultKdfIterations)
+ * (1_048_576). Output length is 64 bytes.
+ *
+ * Params:
+ *   password  = User password (UTF-8 string).
+ *   pepper    = Optional application-wide secret mixed into the salt. May be
+ *               empty if unused.
+ *   algorithm = KDF to use. Default: $(D KdfAlgorithm.Default) (scrypt).
+ *               HKDF, Argon2, and None are rejected.
+ *
+ * Returns: $(D HashedPassword) ready for encoding via $(D toString).
+ *
+ * Throws: $(D CryptographicException) for unsupported algorithms or KDF failure.
+ */
 @safe public HashedPassword securePassword(string password, const ubyte[] pepper, KdfAlgorithm algorithm = KdfAlgorithm.Default) {
     if (algorithm == KdfAlgorithm.HKDF) throw new CryptographicException("KdfAlgorithm.HKDF is not supported for password security.");
 
@@ -129,6 +190,24 @@ public enum VerifyPasswordResult
     throw new CryptographicException("KdfAlgorithm.None is not supported for password security.");
 }
 
+/**
+ * Verifies a supplied password against a stored $(D HashedPassword).
+ *
+ * Uses constant-time comparison of derived keys. Parameter version 0 for
+ * PBKDF2 indicates legacy parameters and returns $(D Rehash) on success so
+ * callers can upgrade stored hashes.
+ *
+ * Params:
+ *   suppliedPassword = Password presented by the user.
+ *   storedPassword   = Previously stored hash (from $(D securePassword) or
+ *                      decoded via $(D HashedPassword.this(string))).
+ *   pepper           = Same application pepper used when hashing (may be empty).
+ *
+ * Returns: $(D Success), $(D Failure), or $(D Rehash).
+ *
+ * Throws: $(D CryptographicException) if the stored algorithm is unsupported
+ *         for password verification (HKDF, Argon2).
+ */
 @safe public VerifyPasswordResult verifyPassword(string suppliedPassword, HashedPassword storedPassword, const ubyte[] pepper) {
     if (storedPassword.algorithm == KdfAlgorithm.HKDF) throw new CryptographicException("KdfAlgorithm.HKDF is not supported for password security.");
 
@@ -178,11 +257,37 @@ unittest {
     });
 }
 
+/**
+ * Result of a key-derivation operation that generates its own salt.
+ *
+ * Fields:
+ *   salt = Random salt used during derivation (must be stored with the key).
+ *   key  = Derived key material.
+ */
 public struct KdfResult {
+    /// Random salt used during derivation.
     public ubyte[] salt;
+    /// Derived key material.
     public ubyte[] key;
 }
 
+/**
+ * Derives a key from `password` using PBKDF2-HMAC with the library defaults.
+ *
+ * Generates a random salt of length equal to the default hash output
+ * (SHA2-384 → 48 bytes). Uses $(D HashAlgorithm.Default) and produces a key of
+ * the same length. Default iterations are $(D defaultKdfIterations)
+ * (1_048_576) for a high work factor against offline guessing.
+ *
+ * Params:
+ *   password   = Password string to stretch.
+ *   iterations = PBKDF2 iteration count. Default: $(D defaultKdfIterations).
+ *
+ * Returns: $(D KdfResult) containing the salt and derived key. Persist both.
+ *
+ * Throws: $(D AlgorithmNotSupportedException) / $(D CryptographicException) on
+ *         provider failure.
+ */
 @safe public KdfResult pbkdf2(string password, uint iterations = defaultKdfIterations) {
     KdfResult result;
     result.salt = random(getHashLength(HashAlgorithm.Default));
@@ -190,6 +295,18 @@ public struct KdfResult {
     return result;
 }
 
+/**
+ * Verifies that `key` was derived from `password` and `salt` with the default
+ * PBKDF2 parameters (SHA2-384, key length = hash length).
+ *
+ * Params:
+ *   key        = Expected derived key.
+ *   salt       = Salt used during original derivation.
+ *   password   = Password to re-derive from.
+ *   iterations = PBKDF2 iteration count. Default: $(D defaultKdfIterations).
+ *
+ * Returns: `true` if the re-derived key matches `key` (constant-time).
+ */
 @safe public bool pbkdf2_verify(const ubyte[] key, const ubyte[] salt, string password, uint iterations = defaultKdfIterations) {
     ubyte[] test = pbkdf2_ex(password, salt, HashAlgorithm.Default, getHashLength(HashAlgorithm.Default), iterations);
     return constantTimeEquality(key, test);
@@ -199,6 +316,22 @@ package(secured) string unsupportedKdfMessage(string name) {
     return "KDF '" ~ name ~ "' is not supported by the active cryptographic provider. Enable the 'polyfill' configuration to use OpenSSL as a fallback.";
 }
 
+/**
+ * Derives a key from `password` using PBKDF2-HMAC with full parameter control.
+ *
+ * Params:
+ *   password   = Password string to stretch.
+ *   salt       = Salt bytes (should be unique and random per password).
+ *   func       = Underlying hash for HMAC (e.g. $(D HashAlgorithm.SHA2_384)).
+ *   outputLen  = Desired derived-key length in bytes.
+ *   iterations = PBKDF2 iteration count (higher = slower offline attacks).
+ *
+ * Returns: Derived key of length `outputLen`.
+ *
+ * Throws:
+ *   $(D AlgorithmNotSupportedException) if the hash/KDF is unavailable.
+ *   $(D CryptographicException) on provider failure.
+ */
 @trusted public ubyte[] pbkdf2_ex(string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
     static if (activeProvider == Provider.OpenSSL || activeProvider == Provider.LibreSSL || activeProvider == Provider.BoringSSL) {
         return pbkdf2_impl_openssl(password, salt, func, outputLen, iterations);
@@ -225,6 +358,20 @@ package(secured) string unsupportedKdfMessage(string name) {
     }
 }
 
+/**
+ * Verifies a PBKDF2-derived key with full parameter control using constant-time
+ * comparison.
+ *
+ * Params:
+ *   test       = Expected derived key.
+ *   password   = Password to re-derive from.
+ *   salt       = Salt used during original derivation.
+ *   func       = Hash algorithm used in PBKDF2-HMAC.
+ *   outputLen  = Derived-key length in bytes.
+ *   iterations = PBKDF2 iteration count.
+ *
+ * Returns: `true` if the re-derived key matches `test`.
+ */
 @safe public bool pbkdf2_verify_ex(const ubyte[] test, string password, const ubyte[] salt, HashAlgorithm func, uint outputLen, uint iterations) {
     ubyte[] key = pbkdf2_ex(password, salt, func, outputLen, iterations);
     return constantTimeEquality(test, key);
@@ -338,10 +485,37 @@ unittest
     });
 }
 
+/**
+ * Derives a new key from a $(D SymmetricKey) via HKDF using the cipher's native
+ * key length as the output size.
+ *
+ * Generates a random salt of default-hash length (SHA2-384 → 48 bytes). Empty
+ * `info` is used. Prefer this for expanding high-entropy key material—not for
+ * password hashing.
+ *
+ * Params:
+ *   key = Source symmetric key (high-entropy input keying material).
+ *
+ * Returns: $(D KdfResult) with salt and derived key. Persist the salt if the
+ *          derived key must be reproducible.
+ *
+ * Throws: $(D AlgorithmNotSupportedException) if HKDF is unavailable (requires
+ *         OpenSSL-family or polyfill).
+ */
 @safe public KdfResult hkdf(const SymmetricKey key) {
     return hkdf(key, getCipherKeyLength(key.algorithm));
 }
 
+/**
+ * Derives a new key from a $(D SymmetricKey) via HKDF with an explicit output
+ * length.
+ *
+ * Params:
+ *   key       = Source symmetric key (high-entropy IKM).
+ *   outputLen = Desired derived-key length in bytes.
+ *
+ * Returns: $(D KdfResult) with random salt and derived key.
+ */
 @safe public KdfResult hkdf(const SymmetricKey key, size_t outputLen) {
     KdfResult result;
     result.salt = random(getHashLength(HashAlgorithm.Default));
@@ -349,6 +523,23 @@ unittest
     return result;
 }
 
+/**
+ * HKDF-Extract-and-Expand (RFC 5869) with full parameter control.
+ *
+ * Params:
+ *   key       = Input keying material (IKM). Must be non-empty.
+ *   salt      = Optional salt for Extract (may be empty; random salt preferred).
+ *   info      = Optional context/application-specific info for Expand.
+ *   outputLen = Desired output keying material length in bytes.
+ *   func      = Hash algorithm for HMAC-based HKDF (default elsewhere is
+ *               SHA2-384 for length-extension resilience and OS availability).
+ *
+ * Returns: Derived key of length `outputLen`.
+ *
+ * Throws:
+ *   $(D CryptographicException) if `key` is empty.
+ *   $(D AlgorithmNotSupportedException) if HKDF is unavailable on this build.
+ */
 @trusted public ubyte[] hkdf_ex(const ubyte[] key, const ubyte[] salt, string info, size_t outputLen, HashAlgorithm func) {
     if (key.length == 0) {
         throw new CryptographicException("HKDF key cannot be an empty array.");
@@ -407,13 +598,40 @@ unittest
     });
 }
 
+/**
+ * Derives a 64-byte key from a password string using scrypt with library
+ * defaults and a fresh 32-byte random salt.
+ *
+ * Defaults: N = $(D defaultKdfIterations) (2^20), r = $(D defaultSCryptR) (8),
+ * p = $(D defaultSCryptP) (1). These match the common memory-hard scrypt
+ * profile and provide strong resistance to GPU/ASIC offline attacks.
+ *
+ * Params:
+ *   password = Password string to stretch.
+ *
+ * Returns: $(D KdfResult) with salt and 64-byte derived key. Persist both.
+ *
+ * Throws: $(D AlgorithmNotSupportedException) if scrypt is unavailable
+ *         (requires OpenSSL-family or polyfill).
+ */
 @safe public KdfResult scrypt(string password) {
     KdfResult result;
     result.salt = random(32);
-    result.key = scrypt_ex(password, result.salt, defaultSCryptR, defaultSCryptR, defaultSCryptP, maxSCryptMemory, 64);
+    // N must be a large power of two (defaultKdfIterations = 2^20). Using
+    // defaultSCryptR for N was a parameter mix-up that made scrypt trivial.
+    result.key = scrypt_ex(password, result.salt, defaultKdfIterations, defaultSCryptR, defaultSCryptP, maxSCryptMemory, 64);
     return result;
 }
 
+/**
+ * Derives a 64-byte key from raw password bytes using scrypt with library
+ * defaults and a fresh 32-byte random salt.
+ *
+ * Params:
+ *   password = Password bytes to stretch.
+ *
+ * Returns: $(D KdfResult) with salt and 64-byte derived key.
+ */
 @safe public KdfResult scrypt(const ubyte[] password) {
     KdfResult result;
     result.salt = random(32);
@@ -421,15 +639,55 @@ unittest
     return result;
 }
 
+/**
+ * scrypt with default N/r/p and an explicit output length.
+ *
+ * Params:
+ *   password = Password string.
+ *   salt     = Salt bytes (unique per password).
+ *   length   = Desired derived-key length in bytes.
+ *
+ * Returns: Derived key of length `length`.
+ */
 @trusted public ubyte[] scrypt_ex(string password, const ubyte[] salt, size_t length) {
     return scrypt_ex(cast(ubyte[])password, salt, defaultKdfIterations, defaultSCryptR, defaultSCryptP, maxSCryptMemory, length);
 }
 
+/**
+ * scrypt with full parameter control (string password).
+ *
+ * Params:
+ *   password  = Password string (converted via $(D representation)).
+ *   salt      = Salt bytes.
+ *   n         = CPU/memory cost (must be a power of two).
+ *   r         = Block size parameter.
+ *   p         = Parallelization parameter.
+ *   maxMemory = Soft memory cap passed to the provider.
+ *   length    = Desired derived-key length in bytes.
+ *
+ * Returns: Derived key of length `length`.
+ */
 @trusted public ubyte[] scrypt_ex(string password, const ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, size_t length) {
     import std.string;
     return scrypt_ex(cast(ubyte[])password.representation, salt, n, r, p, maxMemory, length);
 }
 
+/**
+ * scrypt with full parameter control (raw password bytes).
+ *
+ * Params:
+ *   password  = Password bytes.
+ *   salt      = Salt bytes.
+ *   n         = CPU/memory cost (must be a power of two).
+ *   r         = Block size parameter.
+ *   p         = Parallelization parameter.
+ *   maxMemory = Soft memory cap passed to the provider.
+ *   length    = Desired derived-key length in bytes.
+ *
+ * Returns: Derived key of length `length`.
+ *
+ * Throws: $(D AlgorithmNotSupportedException) if scrypt is unavailable.
+ */
 @trusted public ubyte[] scrypt_ex(const ubyte[] password, const ubyte[] salt, ulong n, ulong r, ulong p, ulong maxMemory, size_t length) {
     static if (usesOpenSSL) {
         return scrypt_impl_openssl(password, salt, n, r, p, maxMemory, length);

@@ -135,7 +135,12 @@ int EVP_PKEY_decrypt(EVP_PKEY_CTX* ctx, ubyte* out_, size_t* outlen, const(ubyte
 int EVP_PKEY_CTX_set_signature_md(EVP_PKEY_CTX* ctx, void* md);
 int EVP_PKEY_CTX_set_rsa_keygen_bits(EVP_PKEY_CTX* ctx, int bits);
 int EVP_PKEY_CTX_set_rsa_padding(EVP_PKEY_CTX* ctx, int pad);
+int EVP_PKEY_CTX_set_rsa_oaep_md(EVP_PKEY_CTX* ctx, const(EVP_MD)* md);
+int EVP_PKEY_CTX_set_rsa_mgf1_md(EVP_PKEY_CTX* ctx, const(EVP_MD)* md);
 int EVP_PKEY_CTX_set_ec_paramgen_curve_nid(EVP_PKEY_CTX* ctx, int nid);
+
+// Default PKCS#5/PKCS#8 PBKDF2 iteration count used by PEM_write_bio_PKCS8PrivateKey.
+enum int PKCS5_DEFAULT_ITER = 2048;
 
 // ---------------------------------------------------------------------------
 // Symmetric ciphers
@@ -186,6 +191,7 @@ int PKCS5_PBKDF2_HMAC(const(char)* pass, int passlen, const(ubyte)* salt, int sa
 int EVP_PBE_scrypt(const(char)* pass, size_t passlen, const(ubyte)* salt, size_t saltlen, ulong N, ulong r, ulong p, ulong maxmem, ubyte* key, size_t keylen);
 
 EVP_KDF*     EVP_KDF_fetch(OSSL_LIB_CTX* libctx, const(char)* algorithm, const(char)* properties);
+void         EVP_KDF_free(EVP_KDF* kdf);
 EVP_KDF_CTX* EVP_KDF_CTX_new(EVP_KDF* kdf);
 void         EVP_KDF_CTX_free(EVP_KDF_CTX* ctx);
 int          EVP_KDF_derive(EVP_KDF_CTX* ctx, ubyte* key, size_t keylen, const(ossl_param_st)* params);

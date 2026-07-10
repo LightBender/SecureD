@@ -5,6 +5,21 @@
 3. Fully move and update imports.
 4. Please add a task to update the README with edits that cover all the changes made in this plan.
 
-Let's pivot a bit before continuing. Please remove wolfSSL/GnuTLS/NSS from the implementation plan and dub+configuration as this change is getting too large. Then continue implementation.
+Let's pivot a bit before continuing. Please remove wolfSSL/GnuTLS/NSS from the implementation plan and dub+configuration as this change is getting too large.
 
+Ok, let's do a refactoring to make it easier to review and audit this library. We would like to move all of the system specific "impl" methods to system specific D modules in the "system" folder. For example, "system\windows.d".
 
+Now that the refactoring is complete, let's continue with RSA for Windows and MacOS to enable system integration. On MacOS you'll need to use the Security framework. Both will need additions to the system implementations. There are two ways to do this. First we could implement a full class for the each system in the systems folder and then use conditional compilation to pull it in, but this is very brittle as any API change would have to replicated across the different implementations. Instead what we would like to do if possible is implement the various methods as package private free-functions that accept whatever context is necessary (for example the EVP_PKEY* type) to run. This keeps the API unified and keeps with how we've implemented the other free-function based API's as high-level dispatchers.
+
+We need to fix the quirks in the RSA and ECC you noticed, the incorrect ECC Curve, EVP_PKEY_verify return check bug, and the memory leaks. Then we would like to implement the unittests you noticed were missing for some of the RSA methods and test any ECC methods without a test. These tests should be new tests that do not modify the existing tests.
+
+Under SemVer rules we can ADD members/parameters to the API so we may be able to resolve a couple of the remaining issues as follows:
+1. I've added a member named "_salt", this member can be used to return a randomly generated salt value from "generateSymmetricKey" method. This will need to be accompanied by Documentation comments on both the method an the structure explaining that the salt value will need to be saved for this key to be usable.
+2. We can add a "HashAlgorithm" parameter to the "rsaSeal" methods on all backends to support both SHA2 and SHA3 methods with the default value being SHA2-384 then wire it up to the front-end method. Note that not all versions of the native-OS will support SHA3, so there are detection methods that must be called prior to use and the code must throw an exception if they are used on a machine that does not support them. The SHA2-384 default will be safe on all supported OS versions.
+4. Throw an exception when the specified number of iterations does not match the internal number of iterations defined by OpenSSL, being sure to note the correct number in the exception method.
+5. Throw an exception when use3Des is specified on backends that do not support it, being sure to note which method is used instead.
+7. Throw an exception when the native backend cannot honor the requested encryption method.
+Please include a note in the README about the Non-AEAD ciphertext decryption problem and note that they can use v3.0.0 to decrypt and then use v3.1.0 to re-encrypt.
+Please update the list of fixed bugs to include the newly fixed bugs (along with their severity) and write it to a document titled AUDIT.md
+
+Finally, please generate comprehensive documentation for all public functions/methods of the API, include an explanation of what the method does and a list of it's parameters with a brief explanation of what they do, what the defaults are, and why the defaults were select (ex: SHA2-384 is used for it's resilience to length extension attacks, GCM ciphers are used for the ubiquity and solid security). Where documentation comments already exist please augment them with anything missing from this list.

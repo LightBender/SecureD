@@ -106,6 +106,14 @@ SecureD follows SemVer. This means that the API surface and cryptographic implem
 
 When an OpenSSL-family provider is used (OpenSSL, LibreSSL, BoringSSL, or the polyfill), SecureD is built against OpenSSL 3.0.12 (or a compatible LibreSSL/BoringSSL) or greater. The OpenSSL API declarations SecureD requires are vendored directly into the library (see `source/secured/bindings/openssl.d`), so there is no external Deimos binding dependency.
 
+### Non-AEAD ciphertext compatibility (v3.0.0 → v3.1.0)
+
+In v3.0.0, non-AEAD modes (AES-CBC / AES-CTR / AES-CFB / ChaCha20) used the public IV as the HMAC secret when computing the encrypt-then-MAC authentication tag. That construction is incorrect: the IV is not secret and must not be used as a MAC key.
+
+v3.1.0 derives the MAC key as `hash(encryptionKey)` and binds the IV into the MAC input instead. Ciphertexts produced with non-AEAD modes under v3.0.0 therefore cannot be decrypted with v3.1.0 (authentication will fail).
+
+**Migration:** decrypt affected data with SecureD **v3.0.0**, then re-encrypt with **v3.1.0** (or later). AEAD modes (AES-GCM, ChaCha20-Poly1305) are unaffected.
+
 ## Examples
 
 ### Hashing/HMAC
